@@ -1,0 +1,6 @@
+# token2rice bundle patch:把插件行插进当前 profile 的配置树。
+# 宿主半边只做一件事——折叠 token 用量并挂在 /token2rice/* 上;
+# 浏览器半边从 shell.overlay 掉落白米饭。
+- insert:
+    - id: token2rice
+      name: token2rice
