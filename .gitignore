@@ -1,0 +1,18 @@
+# 依赖与构建产物
+node_modules/
+pnpm-lock.yaml
+package-lock.json
+
+# 开发期随手生成的对比图(脚本每次跑都会重写)
+tools/check-magenta.png
+tools/*.tmp
+
+# 用户自己的米饭图(存在 $DSH_HOME,不该进仓库)
+art.img
+
+# 编辑器 / 系统
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.log
