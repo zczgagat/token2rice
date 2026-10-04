@@ -1,19 +1,32 @@
 {
   "name": "token2rice",
   "version": "1.0.0",
-  "private": true,
-  "description": "每花掉 N token,就从窗口顶端掉下一碗白米饭,落在 DSH 底部边框堆成一排。",
+  "description": "每花掉 N token 就从 DSH 窗口顶端掉下一碗白米饭的插件 / A DSH plugin that drops a bowl of rice for every N tokens you spend.",
   "keywords": [
     "dsh",
     "dsh-plugin",
     "deepseek-harness",
+    "deepseek",
     "token",
+    "usage",
+    "cost",
     "rice",
-    "widget"
+    "widget",
+    "fun"
   ],
+  "license": "MIT",
+  "author": "zczgagat",
   "type": "module",
   "main": "index.js",
   "icon": "./icon.svg",
+  "homepage": "https://github.com/zczgagat/token2rice#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/zczgagat/token2rice.git"
+  },
+  "bugs": {
+    "url": "https://github.com/zczgagat/token2rice/issues"
+  },
   "exports": {
     ".": "./index.js",
     "./client": "./client.js",
@@ -28,7 +41,8 @@
     "locale/en.json",
     "locale/zh.json",
     "icon.svg",
-    "README.md"
+    "README.md",
+    "LICENSE"
   ],
   "dsh": {
     "bundle": {
