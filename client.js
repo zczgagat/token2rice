@@ -1403,8 +1403,17 @@ window.__ModuleLoader__.load({
       const artIsCustom = localArt !== null || artCustom
       const remaining = earned === null ? null : per - (counted % per)
       const panelOnTop = pos.top + badgeSize.h / 2 > vp.h / 2
+      // 面板横向居中于"暴风钮 + 计数牌"这一整组的中心,而不是对齐计数牌左缘:
+      // 组合宽度 = 暴风钮 + 8 间隙 + 计数牌,所以面板比它宽,两侧各探出去一点。
+      const clusterLeft = Math.min(pos.left, vortexPos.left)
+      const clusterRight = Math.max(pos.left + badgeSize.w, vortexPos.left + VORTEX_SIZE)
+      const panelLeft = clamp(
+        (clusterLeft + clusterRight) / 2 - PANEL_WIDTH / 2,
+        EDGE,
+        Math.max(EDGE, vp.w - PANEL_WIDTH - EDGE),
+      )
       const panelStyle = Object.assign(
-        { left: clamp(pos.left, EDGE, Math.max(EDGE, vp.w - PANEL_WIDTH - EDGE)) },
+        { left: panelLeft },
         panelOnTop ? { bottom: Math.max(EDGE, vp.h - pos.top + 8) } : { top: pos.top + badgeSize.h + 8 },
       )
 
