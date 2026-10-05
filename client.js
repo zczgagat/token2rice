@@ -21,12 +21,18 @@ window.__ModuleLoader__.load({
     const React = require('react')
     const h = React.createElement
 
-    /** 用户可调旋钮的默认值:1M token 一碗、56px 大米饭。 */
-    const DEFAULTS = { tokensPerBowl: 1000000, bowlSize: 56, countCache: true, showBadge: true, badgePos: null }
+    /** 用户可调旋钮的默认值:1M token 一碗、56px 大米饭、画面上最多摆 24 碗。 */
+    const DEFAULTS = { tokensPerBowl: 1000000, bowlSize: 56, maxBowls: 24, countCache: true, showBadge: true, badgePos: null }
     const SETTINGS_KEY = 'token2rice.settings.v1'
 
-    /** 画面里最多同时摆多少碗;再多就把最老的请出去,避免长会话把 DOM 撑爆。 */
-    const MAX_BOWLS = 24
+    /** 画面里同时摆几碗:面板可调(滑杆范围),这里只是兜底夹取。 */
+    const BOWL_LIMIT_FLOOR = 1
+    const BOWL_LIMIT_CEIL = 200
+    const BOWL_LIMIT_SLIDER_MIN = 4
+    const BOWL_LIMIT_SLIDER_MAX = 80
+    const BOWL_LIMIT_SLIDER_STEP = 4
+    /** 面板高度上限:内容变长之后靠它 + overflow 滚动,而不是无限往下长。 */
+    const PANEL_MAX_HEIGHT = 'max-height:min(68vh,520px)'
     /** 一次补发的下落动画上限:离开很久回来时不至于下 Rice 暴雨。 */
     const MAX_DROP_BATCH = 4
     const POLL_MS = 2500
@@ -109,8 +115,12 @@ window.__ModuleLoader__.load({
       '.t2r-badge .t2r-dim{color:var(--dsw-alias-label-secondary,rgba(200,200,200,.72));font-weight:400}',
       '.t2r-dot{position:fixed;width:14px;height:14px;border-radius:50%;cursor:grab;touch-action:none;z-index:43;background:var(--dsw-alias-bg-layer-2,rgba(28,28,30,.8));border:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.4));opacity:.45;transition:opacity .15s ease}',
       '.t2r-dot:hover{opacity:1}',
-      '.t2r-panel{position:fixed;pointer-events:auto;box-sizing:border-box;width:' + PANEL_WIDTH + 'px;padding:12px;border-radius:12px;border:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.35));background:var(--dsw-alias-bg-layer-1,rgba(24,24,26,.97));color:var(--dsw-alias-label-primary,#e8e8e8);font:400 12px/1.5 system-ui,-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;z-index:44;box-shadow:0 10px 32px rgba(0,0,0,.34);display:flex;flex-direction:column;gap:9px}',
-      '.t2r-panel h4{margin:0;font-size:12px;font-weight:600;letter-spacing:.02em;cursor:move;user-select:none;touch-action:none;display:flex;align-items:center;justify-content:space-between;gap:6px}',
+      '.t2r-panel{position:fixed;pointer-events:auto;box-sizing:border-box;width:' + PANEL_WIDTH + 'px;padding:12px;border-radius:12px;border:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.35));background:var(--dsw-alias-bg-layer-1,rgba(24,24,26,.97));color:var(--dsw-alias-label-primary,#e8e8e8);font:400 12px/1.5 system-ui,-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;z-index:44;box-shadow:0 10px 32px rgba(0,0,0,.34);display:flex;flex-direction:column;gap:9px;' + PANEL_MAX_HEIGHT + ';overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin;scrollbar-color:var(--dsw-alias-border-l1,rgba(128,128,128,.5)) transparent}',
+      '.t2r-panel::-webkit-scrollbar{width:8px}',
+      '.t2r-panel::-webkit-scrollbar-track{background:transparent}',
+      '.t2r-panel::-webkit-scrollbar-thumb{background:var(--dsw-alias-border-l1,rgba(128,128,128,.5));border-radius:999px}',
+      '.t2r-panel::-webkit-scrollbar-thumb:hover{background:var(--dsw-alias-label-secondary,rgba(200,200,200,.6))}',
+      '.t2r-panel h4{margin:-12px 0 0;padding:12px 0 8px;font-size:12px;font-weight:600;letter-spacing:.02em;cursor:move;user-select:none;touch-action:none;display:flex;align-items:center;justify-content:space-between;gap:6px;position:sticky;top:-12px;z-index:1;background:inherit}',
       '.t2r-panel h4 .t2r-grip{color:var(--dsw-alias-label-secondary,rgba(200,200,200,.6));font-weight:400}',
       '.t2r-row{display:flex;align-items:center;justify-content:space-between;gap:8px}',
       '.t2r-row .t2r-key{color:var(--dsw-alias-label-secondary,rgba(200,200,200,.75));flex:none}',
@@ -157,6 +167,9 @@ window.__ModuleLoader__.load({
         if (parsed === null || typeof parsed !== 'object') return out
         if (Number.isFinite(parsed.tokensPerBowl) && parsed.tokensPerBowl >= 1000) out.tokensPerBowl = Math.round(parsed.tokensPerBowl)
         if (Number.isFinite(parsed.bowlSize) && parsed.bowlSize >= 12 && parsed.bowlSize <= 240) out.bowlSize = Math.round(parsed.bowlSize)
+        if (Number.isFinite(parsed.maxBowls) && parsed.maxBowls >= BOWL_LIMIT_FLOOR && parsed.maxBowls <= BOWL_LIMIT_CEIL) {
+          out.maxBowls = Math.round(parsed.maxBowls)
+        }
         if (typeof parsed.countCache === 'boolean') out.countCache = parsed.countCache
         if (typeof parsed.showBadge === 'boolean') out.showBadge = parsed.showBadge
         const pos = parsed.badgePos
@@ -547,6 +560,8 @@ window.__ModuleLoader__.load({
       const aspectRef = React.useRef(DEFAULT_ASPECT)
       const serialRef = React.useRef(0)
       const earnedRef = React.useRef(null)
+      /** 上一次生效的"最多摆几碗",用来在用户拖动滑杆时重新裁剪。 */
+      const limitRef = React.useRef(0)
       const anchorDragRef = React.useRef(null)
       const dragPosRef = React.useRef(null)
       const fileInputRef = React.useRef(null)
@@ -936,6 +951,8 @@ window.__ModuleLoader__.load({
       const counted = countedTokens(snapshot === null ? null : snapshot.totals, settings.countCache)
       const per = Math.max(1000, Math.round(settings.tokensPerBowl))
       const earned = snapshot === null ? null : Math.floor(counted / per)
+      /** 画面上同时摆几碗(用户可调),超出就把最老的请出去。 */
+      const bowlLimit = clamp(Math.round(settings.maxBowls), BOWL_LIMIT_FLOOR, BOWL_LIMIT_CEIL)
 
       React.useEffect(() => {
         setDraftPer(String(per))
@@ -946,19 +963,20 @@ window.__ModuleLoader__.load({
         if (earned === null) return
         const previous = earnedRef.current
         earnedRef.current = earned
-        if (previous !== null && earned === previous) return
+        if (previous !== null && earned === previous && bowlLimit === limitRef.current) return
+        limitRef.current = bowlLimit
         const sim = simRef.current
 
         if (previous === null) {
           // 首屏:把已经挣到的碗直接摆在地上(不动画),刷新不该下 Rice 暴雨。
-          const target = Math.min(earned, MAX_BOWLS)
+          const target = Math.min(earned, bowlLimit)
           for (let i = sim.list.length; i < target; i += 1) newBowl(true)
           syncList()
           return
         }
 
         if (earned > previous) {
-          const grew = Math.min(earned - previous, MAX_BOWLS * 2)
+          const grew = Math.min(earned - previous, bowlLimit * 2)
           let dropped = 0
           for (let i = 0; i < grew; i += 1) {
             const animate = !reduceMotion.current && dropped < MAX_DROP_BATCH
@@ -971,16 +989,16 @@ window.__ModuleLoader__.load({
               newBowl(true)
             }
           }
-          trimTo(MAX_BOWLS)
+          trimTo(bowlLimit)
           syncList()
           kick()
           return
         }
 
-        // 阈值调大或账本被重置:按新的目标裁掉最旧的几碗。
-        trimTo(Math.min(earned, MAX_BOWLS))
+        // 阈值调大、账本被重置,或者用户改了"最多摆几碗":按新目标裁掉最旧的几碗。
+        trimTo(Math.min(earned, bowlLimit))
         syncList()
-      }, [earned, newBowl, trimTo, syncList, kick])
+      }, [earned, bowlLimit, newBowl, trimTo, syncList, kick])
 
       // ---- 米饭大小变化:飞行中的碗也立刻换尺寸 ----
       React.useEffect(() => {
@@ -1579,6 +1597,21 @@ window.__ModuleLoader__.load({
             h(
               'div',
               { className: 't2r-row' },
+              h('span', { className: 't2r-key' }, '最多摆几碗'),
+              h('input', {
+                type: 'range',
+                min: BOWL_LIMIT_SLIDER_MIN,
+                max: BOWL_LIMIT_SLIDER_MAX,
+                step: BOWL_LIMIT_SLIDER_STEP,
+                value: bowlLimit,
+                onChange: (event) => update({ maxBowls: Number(event.target.value) }),
+              }),
+              h('span', { className: 't2r-dim' }, bowlLimit + ' 碗'),
+            ),
+            h('div', { className: 't2r-hint' }, '超出这个数量的碗会被最旧的先顶掉;计数的碗数不受影响。'),
+            h(
+              'div',
+              { className: 't2r-row' },
               h('span', { className: 't2r-key' }, '计入缓存 token'),
               h('div', {
                 className: 't2r-switch' + (settings.countCache ? ' on' : ''),
@@ -1650,12 +1683,6 @@ window.__ModuleLoader__.load({
               'div',
               { className: 't2r-actions' },
               h('button', { className: 't2r-btn', onClick: clearBowls }, '清空画面'),
-              h(
-                'button',
-                { className: 't2r-btn', disabled: storm !== null, onClick: startInhale },
-                h(VortexIcon, { size: 14 }),
-                '暴风吸入',
-              ),
               h('button', { className: 't2r-btn', onClick: () => { void resetLedger() } }, '重置账本'),
               h('button', { className: 't2r-btn', onClick: () => update({ badgePos: null }) }, '归位'),
             ),
