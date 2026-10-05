@@ -26,14 +26,16 @@ A DeepSeek Harness (DSH) web-UI plugin that turns burned tokens into something y
 
 | | |
 |---|---|
-| 掉落 | 每攒够一碗的额度就从视口顶端生成一碗,重力自由落体、落地弹跳、压扁回弹、溅几粒米 |
+| 掉落 | 每攒够一碗的额度就从视口顶端生成一碗:**初始朝向随机、自转 0~1 r/s 方向随机、初速度方向随机但一定向下**;之后重力自由落体、落地弹跳、压扁回弹、溅几粒米 |
 | 拖动 | 鼠标就是手:碗吊在你抓住的那个点上,拖着走会绕着鼠标摆、甩一下会荡起来,松手按当前速度继续飞 |
 | 暴风吸入 | 计数牌左边的漩涡钮:所有碗沿螺旋被卷进风眼,边转边缩小淡出(已挣到的计数不受影响) |
 | 扔掉 | 双击一碗把它从画面上删掉;面板里「清空画面」一次全清 |
 | 计数牌 | 右下角(可拖到任意位置)显示已换多少碗、当前花了多少 token;轻点开面板 |
 | 换图 | 面板里「选择图片…」或把图片拖到面板上,换成自己的图(PNG / JPEG / WebP / GIF,≤4MB) |
 
-- Drops: gravity, bounce, squash-and-rebound, a few flying grains on impact.
+- Drops: each bowl spawns with a random orientation, a random spin (0–1 r/s, either direction) and a
+  random initial velocity (any direction, but always downward); then gravity, bounce, squash-and-rebound
+  and a few flying grains on impact.
 - Drag any bowl: the cursor is the hand — the bowl hangs from the point you grabbed and swings around
   the cursor under gravity (a pendulum pivoting at the grab point); releasing hands its momentum to the free fall.
 - Double-click a bowl to remove it; the panel can clear the whole screen.

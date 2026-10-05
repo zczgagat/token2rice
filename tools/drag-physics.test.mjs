@@ -54,18 +54,28 @@ const CONST_NAMES = [
   'INHALE_RADIUS_POWER',
   'INHALE_ANGLE_POWER',
   'INHALE_SHRINK',
+  'SPAWN_VX_MAX',
+  'SPAWN_VY_MIN',
+  'SPAWN_VY_MAX',
+  'SPAWN_SPIN_MAX',
 ]
 
 const constants = CONST_NAMES.map(sliceConst).join('\n')
 const helpers = 'const clamp = (value, lo, hi) => (value < lo ? lo : value > hi ? hi : value)'
 // 物理函数之间互相调用,所以抽出来的原文要在同一个作用域里一起求值。
-const preamble = [constants, helpers, sliceFunction('rotatedExtents')].join('\n')
+const preamble = [constants, helpers, sliceFunction('noiseAt'), sliceFunction('rotatedExtents')].join('\n')
 const stepDragBowl = new Function([preamble, sliceFunction('stepDragBowl'), 'return stepDragBowl'].join('\n'))()
 const stepInhaleBowl = new Function([preamble, sliceFunction('stepInhaleBowl'), 'return stepInhaleBowl'].join('\n'))()
 const rotatedExtents = new Function([sliceFunction('rotatedExtents'), 'return rotatedExtents'].join('\n'))()
 const restingY = new Function(
   [sliceFunction('rotatedExtents'), sliceFunction('restingY'), 'return restingY'].join('\n'),
 )()
+const randomizeSpawn = new Function(
+  [constants, sliceFunction('noiseAt'), sliceFunction('randomizeSpawn'), 'return randomizeSpawn'].join('\n'),
+)()
+/** 常量也要在测试自己的作用域里取一份,断言里要用。 */
+const CONSTS = new Function([constants, 'return {' + CONST_NAMES.join(',') + '}'].join('\n'))()
+const { SPAWN_VX_MAX, SPAWN_VY_MIN, SPAWN_VY_MAX } = CONSTS
 
 const W = 56
 const H = 56 * (181 / 320)
@@ -214,6 +224,28 @@ console.log('⑤ 斜着落地不许穿模:任意倾角下,碗的最低点都不�
   // (c) 接线检查:物理循环里落地判定必须用旋转后的外扩量,不能退回 h
   check('物理循环用的是 rotatedExtents 而不是裸 h', src.includes('const floor = view.h - bowl.h - extents.lowest'))
   check('回正处于贴地状态(restingY)', src.includes('bowl.y = restingY(bowl, view.h)'))
+}
+
+console.log('⑥ 掉落的随机初始状态:任意朝向 / 0~1 r/s 自转 / 速度方向任意但 y 必定向下')
+{
+  const fresh = (serial) => ({ serial, rot: 0, spin: 0, vx: 0, vy: 0, restTilt: 3 })
+  const states = []
+  for (let serial = 1; serial <= 400; serial += 1) states.push(randomizeSpawn(fresh(serial)))
+
+  const rots = states.map((s) => s.rot)
+  const spins = states.map((s) => s.spin)
+  const vxs = states.map((s) => s.vx)
+  const vys = states.map((s) => s.vy)
+
+  check('朝向铺满 0~360°', Math.min(...rots) < 10 && Math.max(...rots) > 350, `${Math.min(...rots).toFixed(0)}° .. ${Math.max(...rots).toFixed(0)}°`)
+  check('自转不超过 1 r/s', Math.max(...spins.map(Math.abs)) <= 360 + 1e-6, `峰值 ${Math.max(...spins.map(Math.abs)).toFixed(0)}°/s`)
+  check('自转两个方向都有', spins.some((s) => s < 0) && spins.some((s) => s > 0))
+  check('水平速度左右都有', vxs.some((v) => v < -20) && vxs.some((v) => v > 20), `${Math.min(...vxs).toFixed(0)} .. ${Math.max(...vxs).toFixed(0)} px/s`)
+  check('水平速度不超上限', Math.max(...vxs.map(Math.abs)) <= SPAWN_VX_MAX + 1e-6)
+  check('y 速度一律向下', Math.min(...vys) > 0, `最小 ${Math.min(...vys).toFixed(0)} px/s`)
+  check('y 速度在合理范围', Math.min(...vys) >= SPAWN_VY_MIN - 1e-6 && Math.max(...vys) <= SPAWN_VY_MAX + 1e-6, `${Math.min(...vys).toFixed(0)} .. ${Math.max(...vys).toFixed(0)} px/s`)
+  check('不覆盖落地回正的目标倾角', states.every((s) => s.restTilt === 3))
+  check('同一序号结果可复现', randomizeSpawn(fresh(42)).rot === randomizeSpawn(fresh(42)).rot)
 }
 
 console.log(failures === 0 ? '\n全部通过。' : `\n${failures} 项失败。`)

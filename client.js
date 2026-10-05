@@ -349,6 +349,38 @@ window.__ModuleLoader__.load({
     const idbWriteArt = (blob) => withArtStore('readwrite', (store) => store.put(blob, IDB_KEY))
     const idbDropArt = () => withArtStore('readwrite', (store) => store.delete(IDB_KEY))
 
+    // ---- 掉落时的随机初始状态 ----
+    const SPAWN_VX_MAX = 160       // 初速度的水平分量上限(px/s),方向任意
+    const SPAWN_VY_MIN = 30        // 初速度的垂直分量:一定是向下,所以只给正区间
+    const SPAWN_VY_MAX = 240
+    const SPAWN_SPIN_MAX = 360     // 自转 0~1 r/s,方向随机
+
+    /**
+     * 给刚生成的一碗随机初始状态。
+     *
+     *   · 朝向:任意角(0~360°);
+     *   · 自转:0~1 r/s(0~360°/s),方向随机;
+     *   · 速度:方向任意,但 **y 分量必定向下**(只取正区间),大小在合理范围内。
+     *
+     * 伪随机取自碗的序号,所以同一碗每次算出来都一样(可复现、可数值测试)。
+     * 只改初始状态,不动 restTilt —— 那是落地回正的目标倾角。
+     *
+     * @param bowl - 刚 makeBowl 出来的状态(原地修改)。
+     * @returns 同一个 bowl。
+     */
+    function randomizeSpawn(bowl) {
+      const serial = bowl.serial
+      const turn = noiseAt(serial * 1.7 + 11)
+      const spinNoise = noiseAt(serial * 2.3 + 29)
+      const vxNoise = noiseAt(serial * 3.1 + 53)
+      const vyNoise = noiseAt(serial * 0.9 + 71)
+      bowl.rot = turn * 360
+      bowl.spin = (spinNoise < 0.5 ? -1 : 1) * spinNoise * SPAWN_SPIN_MAX
+      bowl.vx = (vxNoise - 0.5) * 2 * SPAWN_VX_MAX
+      bowl.vy = SPAWN_VY_MIN + vyNoise * (SPAWN_VY_MAX - SPAWN_VY_MIN)
+      return bowl
+    }
+
     /**
      * 旋转+缩放之后,碗的包围盒相对**变换原点(底面中点,见 CSS transform-origin)**
      * 在 x / y 上的最大外扩量。
@@ -1031,12 +1063,19 @@ window.__ModuleLoader__.load({
           for (let i = 0; i < grew; i += 1) {
             const animate = !reduceMotion.current && dropped < MAX_DROP_BATCH
             if (animate) {
-              const bowl = newBowl(false)
+              // 掉下来的这碗:随机朝向 + 随机自转 + 随机初速度(y 分量必定向下)。
+              const bowl = randomizeSpawn(newBowl(false))
               bowl.y = -bowl.h - 24 - dropped * 20
               bowl.wait = dropped * 0.13
               dropped += 1
             } else {
-              newBowl(true)
+              // 直接摆到地上的那几碗:同样给随机朝向(看起来就是"刚落地、还歪着"),
+              // 但没有初速度,并且按旋转后的包围盒重新贴地。
+              const bowl = randomizeSpawn(newBowl(true))
+              bowl.vx = 0
+              bowl.vy = 0
+              bowl.spin = 0
+              bowl.y = restingY(bowl, vpRef.current.h)
             }
           }
           trimTo(bowlLimit)
