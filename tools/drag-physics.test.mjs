@@ -281,5 +281,21 @@ console.log('⑦ 拖到暴风钮松手:单碗吸入的判定')
   check('命中后调用 inhaleOne', src.includes('inhaleOne(bowl)'))
 }
 
+console.log('⑧ 内嵌吸入音效:base64 能原样还原 assets/food.mp3')
+{
+  const match = /const INHALE_SOUND_B64 = '([^']*)'/.exec(src)
+  check('client.js 里有内嵌音频', match !== null && match[1].length > 0, match === null ? '找不到标记' : `${match[1].length} 字符`)
+  if (match !== null && match[1].length > 0) {
+    const embedded = Buffer.from(match[1], 'base64')
+    const file = readFileSync(fileURLToPath(new URL('../assets/food.mp3', import.meta.url)))
+    check('解出的字节与 assets/food.mp3 完全一致', embedded.length === file.length && embedded.equals(file), `${embedded.length} vs ${file.length} 字节`)
+    const looksMp3 = embedded.slice(0, 3).toString('latin1') === 'ID3' || (embedded[0] === 0xff && (embedded[1] & 0xe0) === 0xe0)
+    check('文件头是 MP3(ID3 / 帧同步)', looksMp3, embedded.slice(0, 3).toString('hex'))
+  }
+  const calls = (src.match(/playInhaleSound\(\)/g) ?? []).length
+  check('单个吸入与全屏吸入都接了播放', calls >= 2, `${calls} 处调用`)
+  check('音量开关能读进设置', src.includes('out.soundOn = parsed.soundOn'))
+}
+
 console.log(failures === 0 ? '\n全部通过。' : `\n${failures} 项失败。`)
 process.exit(failures === 0 ? 0 : 1)

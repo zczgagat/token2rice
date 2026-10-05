@@ -28,7 +28,7 @@ A DeepSeek Harness (DSH) web-UI plugin that turns burned tokens into something y
 |---|---|
 | 掉落 | 每攒够一碗的额度就从视口顶端生成一碗:**初始朝向随机、自转 0~1 r/s 方向随机、初速度方向随机但一定向下**;之后重力自由落体、落地弹跳、压扁回弹、溅几粒米 |
 | 拖动 | 鼠标就是手:碗吊在你抓住的那个点上,拖着走会绕着鼠标摆、甩一下会荡起来,松手按当前速度继续飞 |
-| 暴风吸入 | 计数牌左边的漩涡钮:点一下把所有碗卷进风眼;**把一碗拖到钮上松手则只吸这一碗**(靠近时钮会点亮) |
+| 暴风吸入 | 计数牌左边的漩涡钮:点一下把所有碗卷进风眼;**把一碗拖到钮上松手则只吸这一碗**(靠近时钮会点亮)。两种吸入都会播放音效 |
 | 扔掉 | 双击一碗把它从画面上删掉;面板里「清空画面」一次全清 |
 | 计数牌 | 右下角(可拖到任意位置)显示已换多少碗、当前花了多少 token;轻点开面板 |
 | 换图 | 面板里「选择图片…」或把图片拖到面板上,换成自己的图(PNG / JPEG / WebP / GIF,≤4MB) |
@@ -76,6 +76,7 @@ dsh plugin --profile desktop remove token2rice
 | 计入缓存 token | 开 | 关掉只算新算的 input + output,缓存读取不计入 |
 | 显示计数牌 | 开 | 关掉只留一个小圆点,仍可点开设置 |
 | 落地自动回正 | 开 | 关掉后碗保持落地那一刻的倾角,歪着堆在一起,不再自己摆正 |
+| 吸入音效 | 开 | 点暴风钮、或把碗拖到钮上松手时播放 `assets/food.mp3` |
 | 位置 | 右下角 | 拖计数牌或面板标题栏即可移动;「归位」按钮回默认位置 |
 
 > 面板内容较长时会自己滚动(标题栏固定在上方,仍可拖动移动面板)。
@@ -112,7 +113,7 @@ Counting starts when the plugin is first enabled, never retroactively.
 | [client.js](client.js) | 浏览器半边:浮层、物理、面板、导入图片 |
 | [cordis.patch.yml](cordis.patch.yml) | bundle patch,把插件行插进 profile |
 | [docs/notes.zh.md](docs/notes.zh.md) | 中文实现笔记(路由表、缓存、竞态处理等细节) |
-| [tools/](tools) | 米饭图来源脚本:`rawcopy.py`(原样拷贝)/ `cutout.py`(自动抠底) |
+| [tools/](tools) | 米饭图来源脚本:`rawcopy.py`(原样拷贝)/ `cutout.py`(自动抠底);`build-vortex-icon.py` 生成暴风图标;`embed-sound.py` 把 `assets/food.mp3` 内嵌进 client.js |
 
 ## License
 
