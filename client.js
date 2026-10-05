@@ -64,6 +64,17 @@ window.__ModuleLoader__.load({
     const DRAG_WALL_FRICTION = 0.3 // 拖到墙边/地面时保留的速度比例
     const COM_ARM = 0.42           // 重心在底面之上的高度(占碗高比例)
 
+    // ---- 暴风吸入 ----
+    const VORTEX_SIZE = 36         // 圆钮直径(px)
+    const VORTEX_ICON_SIZE = 22    // 钮里的图标尺寸
+    const INHALE_MIN_SEC = 0.5     // 最近的碗也要转这么久才被吸进去
+    const INHALE_MAX_SEC = 0.9     // 最远的碗
+    const INHALE_RADIUS_POWER = 1.25 // 半径收缩曲线:(1-p)^1.25,越靠近风眼收得越急
+    const INHALE_ANGLE_POWER = 0.85  // 角度推进曲线:p^0.85,越靠近风眼转得越快
+    const INHALE_TURNS_MIN = 1.5   // 每个碗绕风眼转几圈(按序号取伪随机)
+    const INHALE_TURNS_MAX = 2.7
+    const INHALE_SHRINK = 0.92     // 到达风眼时缩到原来的 8%
+
     // ---- 计数牌 / 面板几何 ----
     const BADGE_W = 152            // 计数牌定宽:拖动夹取和面板对齐都按它算,几何才是准的
     const BADGE_H = 28
@@ -120,6 +131,15 @@ window.__ModuleLoader__.load({
       '.t2r-panel.t2r-dropping{border-color:var(--dsw-alias-brand-primary,#4d8dff);box-shadow:0 0 0 2px color-mix(in srgb,var(--dsw-alias-brand-primary,#4d8dff) 35%,transparent),0 10px 32px rgba(0,0,0,.34)}',
       '.t2r-actions{display:flex;gap:6px}',
       '.t2r-actions button{flex:1}',
+      '.t2r-actions button.t2r-btn{display:flex;align-items:center;justify-content:center;gap:5px}',
+      '.t2r-vortex{position:fixed;width:' + VORTEX_SIZE + 'px;height:' + VORTEX_SIZE + 'px;box-sizing:border-box;padding:0;border-radius:50%;display:flex;align-items:center;justify-content:center;pointer-events:auto;cursor:pointer;color:var(--dsw-alias-label-primary,#e8e8e8);background:var(--dsw-alias-bg-layer-2,rgba(28,28,30,.86));border:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.35));z-index:43;backdrop-filter:blur(8px);box-shadow:0 2px 10px rgba(0,0,0,.18);transition:transform .12s ease,border-color .12s ease,color .12s ease}',
+      '.t2r-vortex:hover{border-color:var(--dsw-alias-brand-primary,#4d8dff);color:var(--dsw-alias-brand-primary,#4d8dff)}',
+      '.t2r-vortex:active{transform:scale(.92)}',
+      '.t2r-vortex[data-storming="yes"]{pointer-events:none;color:var(--dsw-alias-brand-primary,#4d8dff);border-color:var(--dsw-alias-brand-primary,#4d8dff)}',
+      '.t2r-vortex[data-storming="yes"] svg{animation:t2r-spin .45s linear infinite}',
+      '@keyframes t2r-spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}',
+      '.t2r-storm{position:fixed;pointer-events:none;z-index:42;transform:translate(-50%,-50%);color:var(--dsw-alias-brand-primary,#4d8dff);animation:t2r-storm .9s ease-out forwards}',
+      '@keyframes t2r-storm{0%{transform:translate(-50%,-50%) scale(.3) rotate(0deg);opacity:0}12%{opacity:.85}55%{opacity:.6}100%{transform:translate(-50%,-50%) scale(1.45) rotate(400deg);opacity:0}}',
       '.t2r-panel button.t2r-btn:disabled{opacity:.45;cursor:default}',
       '.t2r-panel button.t2r-btn:disabled:hover{border-color:var(--dsw-alias-border-l1,rgba(128,128,128,.35))}',
       '.t2r-warn{color:var(--dsw-alias-label-warning,#e0a94a)}',
@@ -382,6 +402,117 @@ window.__ModuleLoader__.load({
       }
     }
 
+    // ---- "暴风吸入"图标 ----
+    // 和 assets/vortex.svg 是同一套几何(中心 12,12):一条向内的阿基米德螺旋、
+    // 一个风眼、三粒带着拖尾被卷进来的米。这里现场算路径,免得往代码里贴坐标。
+
+    /** 向内的螺旋路径(屏幕 y 向下,所以正角度方向看起来是顺时针)。 */
+    function vortexSpiralPath(rOut, rIn, turns, samples) {
+      const total = turns * Math.PI * 2
+      let d = ''
+      for (let i = 0; i <= samples; i += 1) {
+        const t = i / samples
+        const theta = t * total
+        const r = rOut + (rIn - rOut) * t
+        d += (i === 0 ? 'M' : 'L') + (12 + r * Math.cos(theta)).toFixed(2) + ' ' + (12 + r * Math.sin(theta)).toFixed(2)
+      }
+      return d
+    }
+
+    /** 一段圆弧路径(米粒身后的拖尾)。 */
+    function vortexArcPath(radius, degFrom, degTo, samples) {
+      let d = ''
+      for (let i = 0; i <= samples; i += 1) {
+        const deg = degFrom + ((degTo - degFrom) * i) / samples
+        const theta = (deg * Math.PI) / 180
+        d += (i === 0 ? 'M' : 'L') + (12 + radius * Math.cos(theta)).toFixed(2) + ' ' + (12 + radius * Math.sin(theta)).toFixed(2)
+      }
+      return d
+    }
+
+    const VORTEX_GRAIN_ANGLES = [200, 302, 64]
+    const VORTEX_GRAIN_RADIUS = 10.2
+    const VORTEX_ART = {
+      eye: 1.25,
+      main: vortexSpiralPath(8.3, 2.6, 1.62, 60),
+      mainStroke: 1.8,
+      trailStroke: 1,
+      trailOpacity: 0.42,
+      trails: VORTEX_GRAIN_ANGLES.map((deg) => vortexArcPath(VORTEX_GRAIN_RADIUS, deg - 30, deg - 6, 10)),
+      grains: VORTEX_GRAIN_ANGLES.map((deg) => {
+        const theta = (deg * Math.PI) / 180
+        return {
+          cx: 12 + VORTEX_GRAIN_RADIUS * Math.cos(theta),
+          cy: 12 + VORTEX_GRAIN_RADIUS * Math.sin(theta),
+          deg: deg + 90,
+        }
+      }),
+    }
+
+    /** 暴风吸入图标(纯 currentColor,深浅主题都跟宿主走)。 */
+    function VortexIcon(props) {
+      const size = props !== undefined && props.size !== undefined ? props.size : 24
+      const art = VORTEX_ART
+      return h(
+        'svg',
+        { viewBox: '0 0 24 24', width: size, height: size, 'aria-hidden': 'true', focusable: 'false' },
+        h('circle', { cx: 12, cy: 12, r: art.eye, fill: 'currentColor' }),
+        h('path', {
+          d: art.main,
+          fill: 'none',
+          stroke: 'currentColor',
+          strokeWidth: art.mainStroke,
+          strokeLinecap: 'round',
+          strokeLinejoin: 'round',
+        }),
+        art.trails.map((d, index) =>
+          h('path', {
+            key: 'trail' + index,
+            d,
+            fill: 'none',
+            stroke: 'currentColor',
+            strokeWidth: art.trailStroke,
+            strokeLinecap: 'round',
+            opacity: art.trailOpacity,
+          }),
+        ),
+        art.grains.map((grain, index) =>
+          h('ellipse', {
+            key: 'grain' + index,
+            cx: grain.cx.toFixed(2),
+            cy: grain.cy.toFixed(2),
+            rx: 1.25,
+            ry: 0.8,
+            transform: 'rotate(' + grain.deg.toFixed(1) + ' ' + grain.cx.toFixed(2) + ' ' + grain.cy.toFixed(2) + ')',
+            fill: 'currentColor',
+          }),
+        ),
+      )
+    }
+
+    /**
+     * 被漩涡吸走的一帧。
+     *
+     * 位置沿一条对数感的螺旋收向风眼:半径按 (1-p)^1.25 收,角度按 p^0.85 推进
+     * (所以越靠近风眼转得越快、越挤),同时等比缩小并淡出。
+     *
+     * @param bowl - 物理状态(要求 bowl.inhale 已就位)。
+     * @param dt - 时间步长(秒)。
+     * @returns 是否已经吸到风眼(该被移除)。
+     */
+    function stepInhaleBowl(bowl, dt) {
+      const swirl = bowl.inhale
+      swirl.t += dt
+      const p = Math.min(1, swirl.t / swirl.dur)
+      const radius = swirl.radius * Math.pow(1 - p, INHALE_RADIUS_POWER)
+      const angle = swirl.angle + swirl.turns * Math.PI * 2 * Math.pow(p, INHALE_ANGLE_POWER)
+      bowl.x = swirl.cx + radius * Math.cos(angle) - bowl.w / 2
+      bowl.y = swirl.cy + radius * Math.sin(angle) - bowl.h / 2
+      bowl.rot += swirl.spin * (0.35 + p) * dt
+      bowl.scale = Math.max(0.06, 1 - p * INHALE_SHRINK)
+      return p >= 1
+    }
+
     function Token2RiceOverlay() {
       const [settings, setSettings] = React.useState(loadSettings)
       const [snapshot, setSnapshot] = React.useState(null)
@@ -393,6 +524,8 @@ window.__ModuleLoader__.load({
       const [artFailed, setArtFailed] = React.useState(false)
       const [vp, setVp] = React.useState(() => ({ w: window.innerWidth, h: window.innerHeight }))
       const [dragPos, setDragPos] = React.useState(null)
+      /** 暴风吸入的视觉:非 null 时在风眼放一圈旋转扩散的螺旋。 */
+      const [storm, setStorm] = React.useState(null)
       /** 自带米饭图:上传/恢复后先信本地值,等下一次快照确认再交回宿主。 */
       const [artOverride, setArtOverride] = React.useState(null)
       const [artNotice, setArtNotice] = React.useState(null)
@@ -446,9 +579,11 @@ window.__ModuleLoader__.load({
       const paint = React.useCallback((bowl) => {
         const el = elRefs.current.get(bowl.serial)
         if (el === undefined) return
-        const squashX = 1 + bowl.squash * 0.55
-        const squashY = 1 - bowl.squash
+        const scale = bowl.scale === undefined ? 1 : bowl.scale
+        const squashX = (1 + bowl.squash * 0.55) * scale
+        const squashY = (1 - bowl.squash) * scale
         el.style.width = bowl.w + 'px'
+        el.style.opacity = scale < 0.999 ? String(Math.max(0.12, scale)) : ''
         el.style.transform =
           'translate3d(' + bowl.x.toFixed(1) + 'px,' + bowl.y.toFixed(1) + 'px,0) rotate(' +
           bowl.rot.toFixed(2) + 'deg) scale(' + squashX.toFixed(3) + ',' + squashY.toFixed(3) + ')'
@@ -485,8 +620,21 @@ window.__ModuleLoader__.load({
           last = now
           const view = vpRef.current
           let active = false
+          const dead = []
 
           for (const bowl of sim.list) {
+            if (bowl.inhale !== null && bowl.inhale !== undefined) {
+              // 被暴风吸走:沿螺旋收向风眼,到点就报销,并在风眼溅一小撮米。
+              if (stepInhaleBowl(bowl, dt)) {
+                spawnGrains(bowl)
+                bowl.inhale = null
+                dead.push(bowl.serial)
+              } else {
+                paint(bowl)
+              }
+              active = true
+              continue
+            }
             if (bowl.wait > 0) {
               // 补发时的出场间隔:先在屏幕上方等着,时间到了再落。
               bowl.wait -= dt
@@ -571,6 +719,14 @@ window.__ModuleLoader__.load({
             paint(bowl)
           }
 
+          if (dead.length > 0) {
+            // 吸到风眼的那几碗:摘出物理世界并重渲染列表(React 会卸载对应 img)。
+            const gone = new Set(dead)
+            sim.list = sim.list.filter((bowl) => !gone.has(bowl.serial))
+            for (const serial of dead) sim.bySerial.delete(serial)
+            setSerialList(sim.list.map((bowl) => bowl.serial))
+          }
+
           if (active) raf = requestAnimationFrame(step)
           else last = 0
         }
@@ -626,6 +782,9 @@ window.__ModuleLoader__.load({
           grabLocalY: 0,
           pointerX: 0,
           pointerY: 0,
+          // 视觉缩放(暴风吸入时收缩)与吸入状态
+          scale: 1,
+          inhale: null,
         }
         simRef.current.list.push(bowl)
         simRef.current.bySerial.set(serial, bowl)
@@ -938,6 +1097,53 @@ window.__ModuleLoader__.load({
           }
       const pos = dragPos === null ? storedPos : dragPos
 
+      // 暴风钮跟在计数牌旁边:左边放得下就放左边,放不下就摞在它上方。
+      const vortexPos = pos.left - VORTEX_SIZE - 8 >= EDGE
+        ? { left: pos.left - VORTEX_SIZE - 8, top: pos.top + (badgeSize.h - VORTEX_SIZE) / 2 }
+        : { left: pos.left, top: Math.max(EDGE, pos.top - VORTEX_SIZE - 8) }
+      const vortexCenter = { x: vortexPos.left + VORTEX_SIZE / 2, y: vortexPos.top + VORTEX_SIZE / 2 }
+
+      /**
+       * 暴风吸入:把所有碗卷进漩涡。
+       *
+       * 每碗记一份螺旋参数(起点半径、起始角、圈数、自转方向),之后由
+       * stepInhaleBowl 逐帧推进;正在被拖的碗先松手再吸。已挣到的计数不受影响
+       * (想立刻清屏且不做动画,面板里还有「清空画面」)。
+       */
+      const startInhale = () => {
+        if (storm !== null) return
+        const sim = simRef.current
+        const target = vortexCenter
+        let count = 0
+        for (const bowl of sim.list) {
+          if (bowl.inhale !== null && bowl.inhale !== undefined) continue
+          if (bowl.dragging) bowl.dragging = false // 手还按着也先松手,再卷走
+          const dx = bowl.x + bowl.w / 2 - target.x
+          const dy = bowl.y + bowl.h / 2 - target.y
+          const distance = Math.sqrt(dx * dx + dy * dy)
+          const noise = noiseAt(bowl.serial + 31)
+          bowl.wait = 0
+          bowl.resting = false
+          bowl.squash = 0
+          bowl.inhale = {
+            t: 0,
+            dur: INHALE_MIN_SEC + Math.min(1, distance / Math.max(1, vp.w)) * (INHALE_MAX_SEC - INHALE_MIN_SEC),
+            cx: target.x,
+            cy: target.y,
+            radius: Math.max(18, distance),
+            angle: Math.atan2(dy, dx),
+            turns: INHALE_TURNS_MIN + noiseAt(bowl.serial + 47) * (INHALE_TURNS_MAX - INHALE_TURNS_MIN),
+            // 图标里的螺旋是顺时针向内卷的,所以碗也统一顺时针,视觉上才"同一个漩涡"
+            spin: 720 + noise * 900,
+          }
+          count += 1
+        }
+        if (count === 0) return
+        setStorm({ key: Date.now(), x: target.x, y: target.y })
+        window.setTimeout(() => setStorm(null), 950)
+        kick()
+      }
+
       const beginAnchorDrag = (event, toggleOnClick) => {
         if (event.pointerType === 'mouse' && event.button !== 0) return
         try {
@@ -1219,6 +1425,37 @@ window.__ModuleLoader__.load({
       )
 
       const earnedText = (earned === null ? 0 : earned) + ' 碗'
+
+      // 暴风吸入钮:挂在计数牌左边(位置跟着计数牌走),按下后所有碗被卷进漩涡。
+      const vortex = h(
+        'button',
+        {
+          className: 't2r-vortex',
+          'data-token2rice': 'vortex',
+          'data-storming': storm === null ? 'no' : 'yes',
+          type: 'button',
+          title: '暴风吸入:把所有米饭卷进漩涡',
+          disabled: storm !== null,
+          style: { left: vortexPos.left + 'px', top: vortexPos.top + 'px' },
+          onClick: startInhale,
+        },
+        h(VortexIcon, { size: VORTEX_ICON_SIZE }),
+      )
+
+      // 风眼处旋转扩散的螺旋(纯装饰,~0.9 秒后自己消失)
+      const stormRing = storm === null
+        ? null
+        : h(
+            'div',
+            {
+              className: 't2r-storm',
+              'data-token2rice': 'storm',
+              key: storm.key,
+              style: { left: storm.x + 'px', top: storm.y + 'px' },
+            },
+            h(VortexIcon, { size: 96 }),
+          )
+
       const badge = settings.showBadge
         ? h(
             'div',
@@ -1413,6 +1650,12 @@ window.__ModuleLoader__.load({
               'div',
               { className: 't2r-actions' },
               h('button', { className: 't2r-btn', onClick: clearBowls }, '清空画面'),
+              h(
+                'button',
+                { className: 't2r-btn', disabled: storm !== null, onClick: startInhale },
+                h(VortexIcon, { size: 14 }),
+                '暴风吸入',
+              ),
               h('button', { className: 't2r-btn', onClick: () => { void resetLedger() } }, '重置账本'),
               h('button', { className: 't2r-btn', onClick: () => update({ badgePos: null }) }, '归位'),
             ),
@@ -1421,7 +1664,7 @@ window.__ModuleLoader__.load({
           )
         : null
 
-      return h(React.Fragment, null, layer, badge, panel)
+      return h(React.Fragment, null, layer, vortex, stormRing, badge, panel)
     }
 
     const STYLE_ID = 'token2rice-style'
