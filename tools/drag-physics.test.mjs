@@ -51,16 +51,15 @@ const CONST_NAMES = [
   'DRAG_WALL_FRICTION',
   'COM_ARM',
   'MAX_THROW',
+  'INHALE_RADIUS_POWER',
+  'INHALE_ANGLE_POWER',
+  'INHALE_SHRINK',
 ]
 
-const stepDragBowl = new Function(
-  [
-    ...CONST_NAMES.map(sliceConst),
-    'const clamp = (value, lo, hi) => (value < lo ? lo : value > hi ? hi : value)',
-    sliceFunction('stepDragBowl'),
-    'return stepDragBowl',
-  ].join('\n'),
-)()
+const constants = CONST_NAMES.map(sliceConst).join('\n')
+const helpers = 'const clamp = (value, lo, hi) => (value < lo ? lo : value > hi ? hi : value)'
+const stepDragBowl = new Function([constants, helpers, sliceFunction('stepDragBowl'), 'return stepDragBowl'].join('\n'))()
+const stepInhaleBowl = new Function([constants, helpers, sliceFunction('stepInhaleBowl'), 'return stepInhaleBowl'].join('\n'))()
 
 const W = 56
 const H = 56 * (181 / 320)
@@ -134,6 +133,44 @@ console.log('③ 抓不同位置:静止姿态不同(绕抓取点转,而不是绕
   const corner = hover(4, 4, 7).rot
   const other = hover(W - 4, H - 4, 7).rot
   check('左上角与右下角姿态明显不同', Math.abs(corner - other) > 60, `${corner.toFixed(0)}° vs ${other.toFixed(0)}°`)
+}
+
+console.log('④ 暴风吸入:沿螺旋收向风眼,到点缩小并终止')
+{
+  const TARGET = { x: 1200, y: 200 }
+  const bowl = makeBowl(4, 4, 200, 700)
+  bowl.scale = 1
+  bowl.inhale = { t: 0, dur: 0.7, cx: TARGET.x, cy: TARGET.y, radius: 700, angle: 0, turns: 2.1, spin: 1200 }
+
+  const centerOf = (b) => ({ x: b.x + b.w / 2, y: b.y + b.h / 2 })
+  const distTo = (b) => Math.hypot(centerOf(b).x - TARGET.x, centerOf(b).y - TARGET.y)
+
+  let frames = 0
+  let done = false
+  let monotone = true
+  let swept = 0
+  let previous = distTo(bowl)
+  let previousAngle = Math.atan2(centerOf(bowl).y - TARGET.y, centerOf(bowl).x - TARGET.x)
+  while (!done && frames < 600) {
+    done = stepInhaleBowl(bowl, DT)
+    const distance = distTo(bowl)
+    const angle = Math.atan2(centerOf(bowl).y - TARGET.y, centerOf(bowl).x - TARGET.x)
+    let delta = angle - previousAngle
+    while (delta > Math.PI) delta -= Math.PI * 2
+    while (delta < -Math.PI) delta += Math.PI * 2
+    swept += Math.abs(delta)
+    if (distance > previous + 0.5) monotone = false
+    previous = distance
+    previousAngle = angle
+    frames += 1
+  }
+
+  check('在时长内终止', done && frames <= Math.ceil(0.7 * 60) + 2, `${frames} 帧`)
+  check('半径一路收小(没有外扩)', monotone)
+  check('终点落在风眼(≤2px)', previous <= 2, `${previous.toFixed(2)}px`)
+  check('缩到 10% 以下', bowl.scale <= 0.1, `scale=${bowl.scale.toFixed(3)}`)
+  check('绕过风眼至少 1.5 圈', swept >= Math.PI * 3, `${(swept / (Math.PI * 2)).toFixed(2)} 圈`)
+  check('自身也在打转', Math.abs(bowl.rot) > 360, `${bowl.rot.toFixed(0)}°`)
 }
 
 console.log(failures === 0 ? '\n全部通过。' : `\n${failures} 项失败。`)
