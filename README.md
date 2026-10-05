@@ -27,13 +27,14 @@ A DeepSeek Harness (DSH) web-UI plugin that turns burned tokens into something y
 | | |
 |---|---|
 | 掉落 | 每攒够一碗的额度就从视口顶端生成一碗,重力自由落体、落地弹跳、压扁回弹、溅几粒米 |
-| 拖动 | 直接抓住任意一碗拖走,松手按你甩出去的手速继续飞(水平速度还带自转) |
+| 拖动 | 鼠标就是手:碗吊在你抓住的那个点上,拖着走会绕着鼠标摆、甩一下会荡起来,松手按当前速度继续飞 |
 | 扔掉 | 双击一碗把它从画面上删掉;面板里「清空画面」一次全清 |
 | 计数牌 | 右下角(可拖到任意位置)显示已换多少碗、当前花了多少 token;轻点开面板 |
 | 换图 | 面板里「选择图片…」或把图片拖到面板上,换成自己的图(PNG / JPEG / WebP / GIF,≤4MB) |
 
 - Drops: gravity, bounce, squash-and-rebound, a few flying grains on impact.
-- Drag any bowl and throw it — the release velocity carries (with spin), then it free-falls again.
+- Drag any bowl: the cursor is the hand — the bowl hangs from the point you grabbed and swings around
+  the cursor under gravity (a pendulum pivoting at the grab point); releasing hands its momentum to the free fall.
 - Double-click a bowl to remove it; the panel can clear the whole screen.
 - The badge (bottom-right, draggable) shows bowls earned and tokens counted; click it for settings.
 - Bring your own artwork (PNG/JPEG/WebP/GIF, ≤ 4MB) — pick a file or drag it onto the panel.
