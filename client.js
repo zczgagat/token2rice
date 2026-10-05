@@ -21,8 +21,8 @@ window.__ModuleLoader__.load({
     const React = require('react')
     const h = React.createElement
 
-    /** 用户可调旋钮的默认值:1M token 一碗、56px 大米饭、画面上最多摆 24 碗。 */
-    const DEFAULTS = { tokensPerBowl: 1000000, bowlSize: 56, maxBowls: 24, countCache: true, showBadge: true, badgePos: null }
+    /** 用户可调旋钮的默认值:1M token 一碗、56px 大米饭、画面上最多摆 24 碗、落地自动回正。 */
+    const DEFAULTS = { tokensPerBowl: 1000000, bowlSize: 56, maxBowls: 24, countCache: true, showBadge: true, settleUpright: true, badgePos: null }
     const SETTINGS_KEY = 'token2rice.settings.v1'
 
     /** 画面里同时摆几碗:面板可调(滑杆范围),这里只是兜底夹取。 */
@@ -173,6 +173,7 @@ window.__ModuleLoader__.load({
         }
         if (typeof parsed.countCache === 'boolean') out.countCache = parsed.countCache
         if (typeof parsed.showBadge === 'boolean') out.showBadge = parsed.showBadge
+        if (typeof parsed.settleUpright === 'boolean') out.settleUpright = parsed.settleUpright
         const pos = parsed.badgePos
         if (pos !== null && typeof pos === 'object' && Number.isFinite(pos.left) && Number.isFinite(pos.top)) {
           out.badgePos = { left: Math.round(pos.left), top: Math.round(pos.top) }
@@ -635,6 +636,7 @@ window.__ModuleLoader__.load({
           const dt = last === 0 ? 0.016 : Math.min(0.032, (now - last) / 1000)
           last = now
           const view = vpRef.current
+          const settleUpright = settingsRef.current.settleUpright !== false
           let active = false
           const dead = []
 
@@ -695,18 +697,21 @@ window.__ModuleLoader__.load({
             }
 
             if (bowl.resting) {
-              // 地面上滑行,然后慢慢摆正到自己的静止倾角。
+              // 地面上滑行;滑停之后是否"慢慢摆正到自己的静止倾角"由用户开关决定
+              // (面板里的「落地自动回正」)。关掉就保持落地时的倾角,一堆米歪着更自然。
               if (Math.abs(bowl.vx) > 4) {
                 bowl.x += bowl.vx * dt
                 bowl.vx *= Math.pow(GROUND_FRICTION, dt)
                 active = true
               } else {
                 bowl.vx = 0
-                if (Math.abs(bowl.rot - bowl.restTilt) > 0.08) {
-                  bowl.rot += (bowl.restTilt - bowl.rot) * Math.min(1, 6 * dt)
-                  active = true
-                } else {
-                  bowl.rot = bowl.restTilt
+                if (settleUpright) {
+                  if (Math.abs(bowl.rot - bowl.restTilt) > 0.08) {
+                    bowl.rot += (bowl.restTilt - bowl.rot) * Math.min(1, 6 * dt)
+                    active = true
+                  } else {
+                    bowl.rot = bowl.restTilt
+                  }
                 }
               }
             } else {
@@ -1011,6 +1016,11 @@ window.__ModuleLoader__.load({
         }
         kick()
       }, [settings.bowlSize, paint, kick])
+
+      // ---- 开关"落地自动回正"后立刻重跑一遍:躺着的碗当场摆正 / 就地停住 ----
+      React.useEffect(() => {
+        kick()
+      }, [settings.settleUpright, kick])
 
       // ---- 碗的拖动 ----
       const setBowlEl = React.useCallback((serial, el) => {
@@ -1649,6 +1659,23 @@ window.__ModuleLoader__.load({
                 },
               }),
             ),
+            h(
+              'div',
+              { className: 't2r-row' },
+              h('span', { className: 't2r-key' }, '落地自动回正'),
+              h('div', {
+                className: 't2r-switch' + (settings.settleUpright ? ' on' : ''),
+                role: 'switch',
+                'aria-checked': settings.settleUpright ? 'true' : 'false',
+                tabIndex: 0,
+                title: '关掉后,碗保持落地那一刻的倾角,不再自己摆正',
+                onClick: () => update({ settleUpright: !settings.settleUpright }),
+                onKeyDown: (event) => {
+                  if (event.key === 'Enter' || event.key === ' ') update({ settleUpright: !settings.settleUpright })
+                },
+              }),
+            ),
+            settings.settleUpright ? null : h('div', { className: 't2r-hint' }, '碗会保持落地时的倾角(歪着堆),不再自己摆正。'),
             h('div', { className: 't2r-hint' }, remaining === null ? '' : '距下一碗还差 ' + formatTokens(remaining) + ' token'),
             h(
               'div',
