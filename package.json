@@ -19,6 +19,9 @@
   "type": "module",
   "main": "index.js",
   "icon": "./icon.svg",
+  "scripts": {
+    "test": "node tools/drag-physics.test.mjs"
+  },
   "homepage": "https://github.com/zczgagat/token2rice#readme",
   "repository": {
     "type": "git",
