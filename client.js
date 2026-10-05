@@ -73,6 +73,7 @@ window.__ModuleLoader__.load({
     // ---- 暴风吸入 ----
     const VORTEX_SIZE = 36         // 圆钮直径(px)
     const VORTEX_ICON_SIZE = 22    // 钮里的图标尺寸
+    const VORTEX_DROP_RADIUS = 68  // 把碗拖到钮心多近松手,算"喂给漩涡"(px)
     const INHALE_MIN_SEC = 0.5     // 最近的碗也要转这么久才被吸进去
     const INHALE_MAX_SEC = 0.9     // 最远的碗
     const INHALE_RADIUS_POWER = 1.25 // 半径收缩曲线:(1-p)^1.25,越靠近风眼收得越急
@@ -146,6 +147,9 @@ window.__ModuleLoader__.load({
       '.t2r-vortex{position:fixed;width:' + VORTEX_SIZE + 'px;height:' + VORTEX_SIZE + 'px;box-sizing:border-box;padding:0;border-radius:50%;display:flex;align-items:center;justify-content:center;pointer-events:auto;cursor:pointer;color:var(--dsw-alias-label-primary,#e8e8e8);background:var(--dsw-alias-bg-layer-2,rgba(28,28,30,.86));border:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.35));z-index:43;backdrop-filter:blur(8px);box-shadow:0 2px 10px rgba(0,0,0,.18);transition:transform .12s ease,border-color .12s ease,color .12s ease}',
       '.t2r-vortex:hover{border-color:var(--dsw-alias-brand-primary,#4d8dff);color:var(--dsw-alias-brand-primary,#4d8dff)}',
       '.t2r-vortex:active{transform:scale(.92)}',
+      // 拖着一碗靠近时点亮:松手就单碗吸入
+      '.t2r-vortex[data-hot="yes"]{transform:scale(1.12);color:var(--dsw-alias-brand-primary,#4d8dff);border-color:var(--dsw-alias-brand-primary,#4d8dff);box-shadow:0 0 0 4px color-mix(in srgb,var(--dsw-alias-brand-primary,#4d8dff) 28%,transparent),0 2px 10px rgba(0,0,0,.2)}',
+      '.t2r-vortex[data-hot="yes"] svg{animation:t2r-spin 1.1s linear infinite}',
       '.t2r-vortex[data-storming="yes"]{pointer-events:none;color:var(--dsw-alias-brand-primary,#4d8dff);border-color:var(--dsw-alias-brand-primary,#4d8dff)}',
       '.t2r-vortex[data-storming="yes"] svg{animation:t2r-spin .45s linear infinite}',
       '@keyframes t2r-spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}',
@@ -421,6 +425,22 @@ window.__ModuleLoader__.load({
     }
 
     /**
+     * 这一碗离暴风钮中心有多近。
+     *
+     * 取"碗心"和"手(指针)"两处距离的较小值:碗在单摆模型里吊在手下,拖的时候
+     * 碗身比指针低一截,只看碗或只看手都会让玩家觉得判定别扭。
+     *
+     * @param bowl - 物理状态。
+     * @param target - 暴风钮中心 { x, y }。
+     * @returns 距离(px)。
+     */
+    function nearVortex(bowl, target) {
+      const byBowl = Math.hypot(bowl.x + bowl.w / 2 - target.x, bowl.y + bowl.h / 2 - target.y)
+      const byPointer = Math.hypot(bowl.pointerX - target.x, bowl.pointerY - target.y)
+      return Math.min(byBowl, byPointer)
+    }
+
+    /**
      * 拖拽中的一碗:鼠标是"手",碗吊在手上。
      *
      *   · 抓取点被一根弹簧拉向指针(带阻尼),所以碗会稍微滞后、静垂一点点;
@@ -613,6 +633,8 @@ window.__ModuleLoader__.load({
       const [dragPos, setDragPos] = React.useState(null)
       /** 暴风吸入的视觉:非 null 时在风眼放一圈旋转扩散的螺旋。 */
       const [storm, setStorm] = React.useState(null)
+      /** 正把某碗拖到暴风钮附近(钮会点亮,提示"松手就被吸走")。 */
+      const [vortexHot, setVortexHot] = React.useState(false)
       /** 自带米饭图:上传/恢复后先信本地值,等下一次快照确认再交回宿主。 */
       const [artOverride, setArtOverride] = React.useState(null)
       const [artNotice, setArtNotice] = React.useState(null)
@@ -647,6 +669,10 @@ window.__ModuleLoader__.load({
       const localBlobRef = React.useRef(null)
       /** 搬运每次挂载只试一次,免得失败时每 2.5 秒重试一遍。 */
       const migrateTriedRef = React.useRef(false)
+      /** 暴风钮中心:拖拽/松手判定要在事件回调里读,所以放 ref。 */
+      const vortexCenterRef = React.useRef({ x: 0, y: 0 })
+      /** 上一次的"是否靠近暴风钮",避免 pointermove 每次都 setState。 */
+      const vortexHotRef = React.useRef(false)
 
       const reduceMotion = React.useRef(false)
       if (typeof window.matchMedia === 'function') {
@@ -1147,6 +1173,8 @@ window.__ModuleLoader__.load({
         bowl.resting = false
         bowl.squash = 0
         bowl.splashed = false
+        vortexHotRef.current = false
+        setVortexHot(false)
         // 把指针位置换算成碗的局部坐标 = 手捏住的那个点;之后它随碗一起转,
         // 所以抓着碗沿拖的时候,碗是绕着那个碗沿摆的。
         const rad = (-bowl.rot * Math.PI) / 180
@@ -1173,14 +1201,28 @@ window.__ModuleLoader__.load({
         // 只记手的位置:位置与姿态由 stepDragBowl 用物理算出来,不再是"贴到指针上"。
         bowl.pointerX = event.clientX
         bowl.pointerY = event.clientY
+        // 拖到暴风钮附近就把钮点亮:提示"在这儿松手会被吸走"。
+        const hot = nearVortex(bowl, vortexCenterRef.current) <= VORTEX_DROP_RADIUS
+        if (hot !== vortexHotRef.current) {
+          vortexHotRef.current = hot
+          setVortexHot(hot)
+        }
         event.preventDefault()
       }
 
       const endBowlDrag = (event, serial) => {
         const bowl = simRef.current.bySerial.get(serial)
         if (bowl === undefined || !bowl.dragging) return
+        // 松手时若碗(或手)落在暴风钮附近,就**单碗吸入**,而不是抛出去。
+        if (nearVortex(bowl, vortexCenterRef.current) <= VORTEX_DROP_RADIUS) {
+          inhaleOne(bowl)
+          event.preventDefault()
+          return
+        }
         bowl.dragging = false
         bowl.wait = 0
+        vortexHotRef.current = false
+        setVortexHot(false)
         // 松手就是自由落体:弹簧攒下的线速度与摆动的角速度直接变成抛出去的初速度,
         // 只做上限保护,免得猛甩一下把碗甩到屏幕外。
         const speed = Math.sqrt(bowl.vx * bowl.vx + bowl.vy * bowl.vy)
@@ -1214,45 +1256,69 @@ window.__ModuleLoader__.load({
         ? { left: pos.left - VORTEX_SIZE - 8, top: pos.top + (badgeSize.h - VORTEX_SIZE) / 2 }
         : { left: pos.left, top: Math.max(EDGE, pos.top - VORTEX_SIZE - 8) }
       const vortexCenter = { x: vortexPos.left + VORTEX_SIZE / 2, y: vortexPos.top + VORTEX_SIZE / 2 }
+      vortexCenterRef.current = vortexCenter
+
+      /**
+       * 给一碗装上螺旋吸入参数(单个吸入与整屏吸入共用同一套几何)。
+       *
+       * @param bowl - 要吸的那碗。
+       * @param target - 风眼(暴风钮中心)的世界坐标。
+       */
+      const armInhale = (bowl, target) => {
+        const dx = bowl.x + bowl.w / 2 - target.x
+        const dy = bowl.y + bowl.h / 2 - target.y
+        const distance = Math.sqrt(dx * dx + dy * dy)
+        const noise = noiseAt(bowl.serial + 31)
+        if (bowl.dragging) bowl.dragging = false // 手还按着也先松手,再卷走
+        bowl.wait = 0
+        bowl.resting = false
+        bowl.squash = 0
+        bowl.inhale = {
+          t: 0,
+          dur: INHALE_MIN_SEC + Math.min(1, distance / Math.max(1, vp.w)) * (INHALE_MAX_SEC - INHALE_MIN_SEC),
+          cx: target.x,
+          cy: target.y,
+          radius: Math.max(18, distance),
+          angle: Math.atan2(dy, dx),
+          turns: INHALE_TURNS_MIN + noiseAt(bowl.serial + 47) * (INHALE_TURNS_MAX - INHALE_TURNS_MIN),
+          // 图标里的螺旋是顺时针向内卷的,所以碗也统一顺时针,视觉上才"同一个漩涡"
+          spin: 720 + noise * 900,
+        }
+      }
+
+      /** 在风眼放一圈旋转扩散的螺旋(单碗 / 全屏吸入共用)。 */
+      const flashStorm = (target) => {
+        setStorm({ key: Date.now(), x: target.x, y: target.y })
+        window.setTimeout(() => setStorm(null), 950)
+      }
 
       /**
        * 暴风吸入:把所有碗卷进漩涡。
        *
        * 每碗记一份螺旋参数(起点半径、起始角、圈数、自转方向),之后由
-       * stepInhaleBowl 逐帧推进;正在被拖的碗先松手再吸。已挣到的计数不受影响
+       * stepInhaleBowl 逐帧推进;正在被拖的碗先松手再吸。已挣到的计费不受影响
        * (想立刻清屏且不做动画,面板里还有「清空画面」)。
        */
       const startInhale = () => {
         if (storm !== null) return
         const sim = simRef.current
-        const target = vortexCenter
         let count = 0
         for (const bowl of sim.list) {
           if (bowl.inhale !== null && bowl.inhale !== undefined) continue
-          if (bowl.dragging) bowl.dragging = false // 手还按着也先松手,再卷走
-          const dx = bowl.x + bowl.w / 2 - target.x
-          const dy = bowl.y + bowl.h / 2 - target.y
-          const distance = Math.sqrt(dx * dx + dy * dy)
-          const noise = noiseAt(bowl.serial + 31)
-          bowl.wait = 0
-          bowl.resting = false
-          bowl.squash = 0
-          bowl.inhale = {
-            t: 0,
-            dur: INHALE_MIN_SEC + Math.min(1, distance / Math.max(1, vp.w)) * (INHALE_MAX_SEC - INHALE_MIN_SEC),
-            cx: target.x,
-            cy: target.y,
-            radius: Math.max(18, distance),
-            angle: Math.atan2(dy, dx),
-            turns: INHALE_TURNS_MIN + noiseAt(bowl.serial + 47) * (INHALE_TURNS_MAX - INHALE_TURNS_MIN),
-            // 图标里的螺旋是顺时针向内卷的,所以碗也统一顺时针,视觉上才"同一个漩涡"
-            spin: 720 + noise * 900,
-          }
+          armInhale(bowl, vortexCenter)
           count += 1
         }
         if (count === 0) return
-        setStorm({ key: Date.now(), x: target.x, y: target.y })
-        window.setTimeout(() => setStorm(null), 950)
+        flashStorm(vortexCenter)
+        kick()
+      }
+
+      /** 拖到漩涡钮附近松手:只吸这一碗。 */
+      const inhaleOne = (bowl) => {
+        const target = vortexCenterRef.current
+        armInhale(bowl, target)
+        flashStorm(target)
+        setVortexHot(false)
         kick()
       }
 
@@ -1554,8 +1620,9 @@ window.__ModuleLoader__.load({
           className: 't2r-vortex',
           'data-token2rice': 'vortex',
           'data-storming': storm === null ? 'no' : 'yes',
+          'data-hot': vortexHot ? 'yes' : 'no',
           type: 'button',
-          title: '暴风吸入:把所有米饭卷进漩涡',
+          title: '暴风吸入:点一下卷走全部米饭;把一碗拖到这儿松手则只吸这一碗',
           disabled: storm !== null,
           style: { left: vortexPos.left + 'px', top: vortexPos.top + 'px' },
           onClick: startInhale,
@@ -1806,7 +1873,7 @@ window.__ModuleLoader__.load({
               h('button', { className: 't2r-btn', onClick: () => { void resetLedger() } }, '重置账本'),
               h('button', { className: 't2r-btn', onClick: () => update({ badgePos: null }) }, '归位'),
             ),
-            h('div', { className: 't2r-hint' }, '拖着米饭可以扔,松手自由落体;双击一碗把它扔掉。面板标题栏也能拖。'),
+            h('div', { className: 't2r-hint' }, '拖着米饭可以扔,松手自由落体;拖到漩涡钮上松手则只吸这一碗;双击一碗把它扔掉。面板标题栏也能拖。'),
             h('div', { className: 't2r-hint' }, '计数自插件启用起;缓存读取通常是大头,关掉它更接近"新算的 token"。'),
           )
         : null

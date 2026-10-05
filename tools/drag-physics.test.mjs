@@ -58,6 +58,7 @@ const CONST_NAMES = [
   'SPAWN_VY_MIN',
   'SPAWN_VY_MAX',
   'SPAWN_SPIN_MAX',
+  'VORTEX_DROP_RADIUS',
 ]
 
 const constants = CONST_NAMES.map(sliceConst).join('\n')
@@ -70,12 +71,13 @@ const rotatedExtents = new Function([sliceFunction('rotatedExtents'), 'return ro
 const restingY = new Function(
   [sliceFunction('rotatedExtents'), sliceFunction('restingY'), 'return restingY'].join('\n'),
 )()
+const nearVortex = new Function([sliceFunction('nearVortex'), 'return nearVortex'].join('\n'))()
 const randomizeSpawn = new Function(
   [constants, sliceFunction('noiseAt'), sliceFunction('randomizeSpawn'), 'return randomizeSpawn'].join('\n'),
 )()
 /** 常量也要在测试自己的作用域里取一份,断言里要用。 */
 const CONSTS = new Function([constants, 'return {' + CONST_NAMES.join(',') + '}'].join('\n'))()
-const { SPAWN_VX_MAX, SPAWN_VY_MIN, SPAWN_VY_MAX } = CONSTS
+const { SPAWN_VX_MAX, SPAWN_VY_MIN, SPAWN_VY_MAX, VORTEX_DROP_RADIUS } = CONSTS
 
 const W = 56
 const H = 56 * (181 / 320)
@@ -246,6 +248,37 @@ console.log('⑥ 掉落的随机初始状态:任意朝向 / 0~1 r/s 自转 / 速
   check('y 速度在合理范围', Math.min(...vys) >= SPAWN_VY_MIN - 1e-6 && Math.max(...vys) <= SPAWN_VY_MAX + 1e-6, `${Math.min(...vys).toFixed(0)} .. ${Math.max(...vys).toFixed(0)} px/s`)
   check('不覆盖落地回正的目标倾角', states.every((s) => s.restTilt === 3))
   check('同一序号结果可复现', randomizeSpawn(fresh(42)).rot === randomizeSpawn(fresh(42)).rot)
+}
+
+console.log('⑦ 拖到暴风钮松手:单碗吸入的判定')
+{
+  const target = { x: 800, y: 700 }
+
+  // 碗吊在手下(单摆模型),手在钮上、碗身低一截 —— 这种"手对准了"的情形也必须算命中
+  const hanging = makeBowl(4, 4, 800 - W / 2, 700 + 46)
+  hanging.pointerX = target.x
+  hanging.pointerY = target.y
+  const hangingDistance = nearVortex(hanging, target)
+  check('手对准钮(碗身低一截)也算命中', hangingDistance <= VORTEX_DROP_RADIUS, `距 ${hangingDistance.toFixed(1)}px`)
+
+  // 碗心正好压在钮上、手离得远
+  const onBowl = makeBowl(4, 4, target.x - W / 2, target.y - H / 2)
+  onBowl.pointerX = target.x + 300
+  onBowl.pointerY = target.y + 300
+  check('碗身压住钮也算命中', nearVortex(onBowl, target) <= VORTEX_DROP_RADIUS, `距 ${nearVortex(onBowl, target).toFixed(1)}px`)
+
+  // 两处都远 → 不命中
+  const far = makeBowl(4, 4, target.x + 200, target.y + 200)
+  far.pointerX = target.x + 260
+  far.pointerY = target.y + 320
+  check('都离得远就不吸入', nearVortex(far, target) > VORTEX_DROP_RADIUS, `距 ${nearVortex(far, target).toFixed(0)}px`)
+
+  // 取的是两个距离里更小的那个
+  check('取碗心/手两处的最小值', Math.abs(nearVortex(hanging, target) - 0) < 1e-6)
+
+  // 接线检查:松手判定真的接在 endBowlDrag 上,且用的是同一个半径常量
+  check('松手时判定命中并单碗吸入', src.includes('if (nearVortex(bowl, vortexCenterRef.current) <= VORTEX_DROP_RADIUS) {'))
+  check('命中后调用 inhaleOne', src.includes('inhaleOne(bowl)'))
 }
 
 console.log(failures === 0 ? '\n全部通过。' : `\n${failures} 项失败。`)
