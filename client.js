@@ -350,6 +350,45 @@ window.__ModuleLoader__.load({
     const idbDropArt = () => withArtStore('readwrite', (store) => store.delete(IDB_KEY))
 
     /**
+     * 旋转+缩放之后,碗的包围盒相对**变换原点(底面中点,见 CSS transform-origin)**
+     * 在 x / y 上的最大外扩量。
+     *
+     * 为什么必须有它:碗是绕底面中点转的,一旦不是正着的,它的角就会落到"底面中点"
+     * 以下 —— 落地判定若还按未旋转的盒子(height)算,斜着落地的那碗就会穿到底边
+     * 下面去。所以地面高度与左右边墙都要用旋转后的包围盒来算。
+     *
+     * @param w - 盒宽(px)。
+     * @param h - 盒高(px)。
+     * @param rotDeg - 旋转角(度,CSS 正向)。
+     * @param scaleX - 横向缩放。
+     * @param scaleY - 纵向缩放。
+     * @returns `halfWidth` 为相对原点的最大水平外扩,`lowest` 为最低点相对原点的下沉量。
+     */
+    function rotatedExtents(w, h, rotDeg, scaleX, scaleY) {
+      const rad = (rotDeg * Math.PI) / 180
+      const cs = Math.cos(rad)
+      const sn = Math.sin(rad)
+      let halfWidth = 0
+      let lowest = 0
+      const corners = [[-w / 2, 0], [w / 2, 0], [-w / 2, -h], [w / 2, -h]]
+      for (const corner of corners) {
+        const sx = corner[0] * scaleX
+        const sy = corner[1] * scaleY
+        const wx = sx * cs - sy * sn
+        const wy = sx * sn + sy * cs
+        if (Math.abs(wx) > halfWidth) halfWidth = Math.abs(wx)
+        if (wy > lowest) lowest = wy
+      }
+      return { halfWidth, lowest }
+    }
+
+    /** 静置时碗的 y:旋转后的最低点正好贴着底边。 */
+    function restingY(bowl, viewHeight) {
+      const extents = rotatedExtents(bowl.w, bowl.h, bowl.rot, 1, 1)
+      return viewHeight - bowl.h - extents.lowest
+    }
+
+    /**
      * 拖拽中的一碗:鼠标是"手",碗吊在手上。
      *
      *   · 抓取点被一根弹簧拉向指针(带阻尼),所以碗会稍微滞后、静垂一点点;
@@ -400,17 +439,18 @@ window.__ModuleLoader__.load({
       bowl.spin *= Math.pow(DRAG_ANG_DRAG, dt)
       bowl.rot += bowl.spin * dt
 
-      // 边墙与地面:挡住 + 吃掉大部分速度(拖拽时不该弹跳)
-      const minX = -bowl.w * 0.4
-      const maxX = view.w - bowl.w * 0.6
-      if (bowl.x < minX) {
-        bowl.x = minX
+      // 边墙与地面:按**旋转后**的包围盒挡,斜着的碗才不会探出屏幕/穿到底边以下。
+      const extents = rotatedExtents(bowl.w, bowl.h, bowl.rot, 1, 1)
+      const centerX = bowl.x + halfW
+      const margin = extents.halfWidth * 0.2
+      if (centerX < margin) {
+        bowl.x = margin - halfW
         bowl.vx = Math.abs(bowl.vx) * DRAG_WALL_FRICTION
-      } else if (bowl.x > maxX) {
-        bowl.x = maxX
+      } else if (centerX > view.w - margin) {
+        bowl.x = view.w - margin - halfW
         bowl.vx = -Math.abs(bowl.vx) * DRAG_WALL_FRICTION
       }
-      const floor = view.h - bowl.h
+      const floor = view.h - bowl.h - extents.lowest
       if (bowl.y > floor) {
         bowl.y = floor
         if (bowl.vy > 0) bowl.vy = -bowl.vy * DRAG_WALL_FRICTION
@@ -676,8 +716,9 @@ window.__ModuleLoader__.load({
               bowl.spin *= Math.pow(0.3, dt)
             }
 
-            // 落地:够快就弹一下并溅米,不够快就停住。
-            const floor = view.h - bowl.h
+            // 落地判定按**旋转后**的包围盒:斜着落的那碗最低点是它的角,不是底面中点。
+            const extents = rotatedExtents(bowl.w, bowl.h, bowl.rot, 1, 1)
+            const floor = view.h - bowl.h - extents.lowest
             if (bowl.y > floor) {
               bowl.y = floor
               const impact = bowl.vy
@@ -714,18 +755,21 @@ window.__ModuleLoader__.load({
                   }
                 }
               }
+              // 回正/滑行会改变"旋转后的最低点",所以每帧重新贴一次地:
+              // 否则碗回正时会浮起一条缝,或者又沉回底边以下。
+              bowl.y = restingY(bowl, view.h)
             } else {
               active = true
             }
 
-            // 左右墙:允许探出小半个身子,撞上去回弹。
-            const minX = -bowl.w * 0.4
-            const maxX = view.w - bowl.w * 0.6
-            if (bowl.x < minX) {
-              bowl.x = minX
+            // 左右墙:同样按旋转后的包围盒算,允许探出小半个身子,撞上去回弹。
+            const centerX = bowl.x + bowl.w / 2
+            const wallMargin = extents.halfWidth * 0.2
+            if (centerX < wallMargin) {
+              bowl.x = wallMargin - bowl.w / 2
               bowl.vx = Math.abs(bowl.vx) * WALL_BOUNCE
-            } else if (bowl.x > maxX) {
-              bowl.x = maxX
+            } else if (centerX > view.w - wallMargin) {
+              bowl.x = view.w - wallMargin - bowl.w / 2
               bowl.vx = -Math.abs(bowl.vx) * WALL_BOUNCE
             }
 
@@ -785,7 +829,7 @@ window.__ModuleLoader__.load({
         const bowl = {
           serial,
           x,
-          y: rest ? view.h - height : -height - 24,
+          y: rest ? view.h - height - rotatedExtents(size, height, pose.tilt, 1, 1).lowest : -height - 24,
           vx: 0,
           vy: 0,
           rot: pose.tilt,
@@ -945,7 +989,7 @@ window.__ModuleLoader__.load({
             bowl.h = bowl.w * aspectRef.current
             const minX = -bowl.w * 0.4
             bowl.x = clamp(bowl.x, minX, Math.max(minX, next.w - bowl.w * 0.6))
-            if (bowl.resting) bowl.y = next.h - bowl.h
+            if (bowl.resting) bowl.y = restingY(bowl, next.h)
             paint(bowl)
           }
           kick()
@@ -1011,7 +1055,7 @@ window.__ModuleLoader__.load({
         for (const bowl of simRef.current.list) {
           bowl.w = settings.bowlSize
           bowl.h = settings.bowlSize * aspectRef.current
-          if (bowl.resting) bowl.y = vpRef.current.h - bowl.h
+          if (bowl.resting) bowl.y = restingY(bowl, vpRef.current.h)
           paint(bowl)
         }
         kick()
@@ -1042,7 +1086,7 @@ window.__ModuleLoader__.load({
             aspectRef.current = aspect
             for (const bowl of simRef.current.list) {
               bowl.h = bowl.w * aspect
-              if (bowl.resting) bowl.y = vpRef.current.h - bowl.h
+              if (bowl.resting) bowl.y = restingY(bowl, vpRef.current.h)
               paint(bowl)
             }
           }

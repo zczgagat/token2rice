@@ -58,8 +58,14 @@ const CONST_NAMES = [
 
 const constants = CONST_NAMES.map(sliceConst).join('\n')
 const helpers = 'const clamp = (value, lo, hi) => (value < lo ? lo : value > hi ? hi : value)'
-const stepDragBowl = new Function([constants, helpers, sliceFunction('stepDragBowl'), 'return stepDragBowl'].join('\n'))()
-const stepInhaleBowl = new Function([constants, helpers, sliceFunction('stepInhaleBowl'), 'return stepInhaleBowl'].join('\n'))()
+// 物理函数之间互相调用,所以抽出来的原文要在同一个作用域里一起求值。
+const preamble = [constants, helpers, sliceFunction('rotatedExtents')].join('\n')
+const stepDragBowl = new Function([preamble, sliceFunction('stepDragBowl'), 'return stepDragBowl'].join('\n'))()
+const stepInhaleBowl = new Function([preamble, sliceFunction('stepInhaleBowl'), 'return stepInhaleBowl'].join('\n'))()
+const rotatedExtents = new Function([sliceFunction('rotatedExtents'), 'return rotatedExtents'].join('\n'))()
+const restingY = new Function(
+  [sliceFunction('rotatedExtents'), sliceFunction('restingY'), 'return restingY'].join('\n'),
+)()
 
 const W = 56
 const H = 56 * (181 / 320)
@@ -171,6 +177,43 @@ console.log('④ 暴风吸入:沿螺旋收向风眼,到点缩小并终止')
   check('缩到 10% 以下', bowl.scale <= 0.1, `scale=${bowl.scale.toFixed(3)}`)
   check('绕过风眼至少 1.5 圈', swept >= Math.PI * 3, `${(swept / (Math.PI * 2)).toFixed(2)} 圈`)
   check('自身也在打转', Math.abs(bowl.rot) > 360, `${bowl.rot.toFixed(0)}°`)
+}
+
+console.log('⑤ 斜着落地不许穿模:任意倾角下,碗的最低点都不越过底边')
+{
+  const angles = [0, 12, 30, 45, 60, 90, 135, 180, -25, -70, -120]
+
+  // (a) 静置摆位:restingY 给出的位置,最低点必须正好落在底边上
+  let worstGap = 0
+  let worstDip = 0
+  for (const deg of angles) {
+    const bowl = makeBowl(4, 4, 400, 300)
+    bowl.rot = deg
+    bowl.y = restingY(bowl, VIEW.h)
+    const lowest = bowl.y + bowl.h + rotatedExtents(bowl.w, bowl.h, bowl.rot, 1, 1).lowest
+    const error = lowest - VIEW.h
+    if (error > worstDip) worstDip = error
+    if (-error > worstGap) worstGap = -error
+  }
+  check('最低点正好贴底(不越过)', worstDip < 0.01, `最深越界 ${worstDip.toFixed(3)}px`)
+  check('也不悬空(浮起 ≤0.01px)', worstGap < 0.01, `最大悬空 ${worstGap.toFixed(3)}px`)
+
+  // (b) 真实拖拽代码:把各种倾角的碗往底边推,看它有没有穿出去
+  let worstDragDip = 0
+  for (const deg of angles) {
+    const bowl = makeBowl(4, 4, 400, 100)
+    bowl.rot = deg
+    bowl.pointerX = 400
+    bowl.pointerY = VIEW.h + 400 // 指针压到屏幕下方,用力把碗往地里按
+    for (let i = 0; i < 240; i += 1) stepDragBowl(bowl, VIEW, DT)
+    const lowest = bowl.y + bowl.h + rotatedExtents(bowl.w, bowl.h, bowl.rot, 1, 1).lowest
+    if (lowest - VIEW.h > worstDragDip) worstDragDip = lowest - VIEW.h
+  }
+  check('拖拽路径也不穿出底边', worstDragDip < 0.5, `最深越界 ${worstDragDip.toFixed(2)}px`)
+
+  // (c) 接线检查:物理循环里落地判定必须用旋转后的外扩量,不能退回 h
+  check('物理循环用的是 rotatedExtents 而不是裸 h', src.includes('const floor = view.h - bowl.h - extents.lowest'))
+  check('回正处于贴地状态(restingY)', src.includes('bowl.y = restingY(bowl, view.h)'))
 }
 
 console.log(failures === 0 ? '\n全部通过。' : `\n${failures} 项失败。`)
