@@ -85,7 +85,7 @@ window.__ModuleLoader__.load({
     const BADGE_W = 152            // 计数牌定宽:拖动夹取和面板对齐都按它算,几何才是准的
     const BADGE_H = 28
     const BADGE_MARGIN = 14
-    const PANEL_WIDTH = 236
+    const PANEL_WIDTH = 280
     const EDGE = 6
     const DRAG_SLOP = 4
 
@@ -115,18 +115,19 @@ window.__ModuleLoader__.load({
       '.t2r-badge .t2r-dim{color:var(--dsw-alias-label-secondary,rgba(200,200,200,.72));font-weight:400}',
       '.t2r-dot{position:fixed;width:14px;height:14px;border-radius:50%;cursor:grab;touch-action:none;z-index:43;background:var(--dsw-alias-bg-layer-2,rgba(28,28,30,.8));border:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.4));opacity:.45;transition:opacity .15s ease}',
       '.t2r-dot:hover{opacity:1}',
-      '.t2r-panel{position:fixed;pointer-events:auto;box-sizing:border-box;width:' + PANEL_WIDTH + 'px;padding:12px;border-radius:12px;border:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.35));background:var(--dsw-alias-bg-layer-1,rgba(24,24,26,.97));color:var(--dsw-alias-label-primary,#e8e8e8);font:400 12px/1.5 system-ui,-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;z-index:44;box-shadow:0 10px 32px rgba(0,0,0,.34);display:flex;flex-direction:column;gap:9px;' + PANEL_MAX_HEIGHT + ';overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin;scrollbar-color:var(--dsw-alias-border-l1,rgba(128,128,128,.5)) transparent}',
+      '.t2r-panel{position:fixed;pointer-events:auto;box-sizing:border-box;width:' + PANEL_WIDTH + 'px;padding:12px;border-radius:12px;border:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.35));background:var(--dsw-alias-bg-layer-1,rgba(24,24,26,.97));color:var(--dsw-alias-label-primary,#e8e8e8);font:400 12px/1.5 system-ui,-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;z-index:44;box-shadow:0 10px 32px rgba(0,0,0,.34);display:flex;flex-direction:column;gap:9px;' + PANEL_MAX_HEIGHT + ';overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;scrollbar-width:thin;scrollbar-color:var(--dsw-alias-border-l1,rgba(128,128,128,.5)) transparent}',
       '.t2r-panel::-webkit-scrollbar{width:8px}',
       '.t2r-panel::-webkit-scrollbar-track{background:transparent}',
       '.t2r-panel::-webkit-scrollbar-thumb{background:var(--dsw-alias-border-l1,rgba(128,128,128,.5));border-radius:999px}',
       '.t2r-panel::-webkit-scrollbar-thumb:hover{background:var(--dsw-alias-label-secondary,rgba(200,200,200,.6))}',
       '.t2r-panel h4{margin:-12px 0 0;padding:12px 0 8px;font-size:12px;font-weight:600;letter-spacing:.02em;cursor:move;user-select:none;touch-action:none;display:flex;align-items:center;justify-content:space-between;gap:6px;position:sticky;top:-12px;z-index:1;background:inherit}',
       '.t2r-panel h4 .t2r-grip{color:var(--dsw-alias-label-secondary,rgba(200,200,200,.6));font-weight:400}',
-      '.t2r-row{display:flex;align-items:center;justify-content:space-between;gap:8px}',
+      '.t2r-row{display:flex;align-items:center;justify-content:space-between;gap:8px;min-width:0}',
       '.t2r-row .t2r-key{color:var(--dsw-alias-label-secondary,rgba(200,200,200,.75));flex:none}',
       '.t2r-panel input[type=number]{width:92px;box-sizing:border-box;background:var(--dsw-alias-bg-layer-2,rgba(255,255,255,.06));color:inherit;border:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.35));border-radius:7px;padding:3px 7px;font:inherit;outline:none}',
       '.t2r-panel input[type=number]:focus{border-color:var(--dsw-alias-brand-primary,#4d8dff)}',
-      '.t2r-panel input[type=range]{width:118px;accent-color:var(--dsw-alias-brand-primary,#4d8dff)}',
+      // 滑杆必须是可收缩的:固定宽度会让整行横向溢出,面板就会长出横向滚动条。
+      '.t2r-panel input[type=range]{flex:1 1 auto;min-width:0;width:auto;max-width:128px;accent-color:var(--dsw-alias-brand-primary,#4d8dff)}',
       '.t2r-swatches{display:flex;gap:5px;flex-wrap:wrap}',
       '.t2r-swatches button,.t2r-panel button.t2r-btn{background:var(--dsw-alias-bg-layer-2,rgba(255,255,255,.06));color:inherit;border:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.35));border-radius:7px;padding:3px 8px;font:inherit;cursor:pointer}',
       '.t2r-swatches button:hover,.t2r-panel button.t2r-btn:hover{border-color:var(--dsw-alias-brand-primary,#4d8dff)}',
@@ -140,7 +141,7 @@ window.__ModuleLoader__.load({
       '.t2r-panel input[type=file]{display:none}',
       '.t2r-panel.t2r-dropping{border-color:var(--dsw-alias-brand-primary,#4d8dff);box-shadow:0 0 0 2px color-mix(in srgb,var(--dsw-alias-brand-primary,#4d8dff) 35%,transparent),0 10px 32px rgba(0,0,0,.34)}',
       '.t2r-actions{display:flex;gap:6px}',
-      '.t2r-actions button{flex:1}',
+      '.t2r-actions button{flex:1 1 0;min-width:0;white-space:nowrap}',
       '.t2r-actions button.t2r-btn{display:flex;align-items:center;justify-content:center;gap:5px}',
       '.t2r-vortex{position:fixed;width:' + VORTEX_SIZE + 'px;height:' + VORTEX_SIZE + 'px;box-sizing:border-box;padding:0;border-radius:50%;display:flex;align-items:center;justify-content:center;pointer-events:auto;cursor:pointer;color:var(--dsw-alias-label-primary,#e8e8e8);background:var(--dsw-alias-bg-layer-2,rgba(28,28,30,.86));border:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.35));z-index:43;backdrop-filter:blur(8px);box-shadow:0 2px 10px rgba(0,0,0,.18);transition:transform .12s ease,border-color .12s ease,color .12s ease}',
       '.t2r-vortex:hover{border-color:var(--dsw-alias-brand-primary,#4d8dff);color:var(--dsw-alias-brand-primary,#4d8dff)}',
