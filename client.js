@@ -50,11 +50,19 @@ window.__ModuleLoader__.load({
     const AIR_DRAG = 0.5           // v *= pow(AIR_DRAG, dt):空中每秒衰减到一半
     const GROUND_FRICTION = 0.02   // 落地后水平速度每秒保留 2%
     const WALL_BOUNCE = 0.42
-    const MAX_THROW = 2600         // 甩出去的速度上限
-    const SPIN_PER_VX = 0.42       // 水平初速度换算成自转
-    const MAX_SPIN = 720
+    const MAX_THROW = 2600         // 松手时的速度上限
+    const MAX_SPIN = 720           // 松手时的自转上限(deg/s)
     const BOUNCE_FLOOR = 220       // 落地速度低于它就直接停住
     const DEFAULT_ASPECT = 181 / 320
+
+    // ---- 拖拽物理(鼠标是"手",碗吊在手上)----
+    const DRAG_SPRING = 520        // 抓取点被拉向指针的弹簧刚度(1/s²);静垂 = GRAVITY/它 ≈ 5px
+    const DRAG_DAMP = 38           // 线速度阻尼,略欠阻尼才有跟手的"甩"感
+    const DRAG_TORQUE = 1          // 重力力矩系数,1 = 标准单摆
+    const DRAG_ANG_DRAG = 0.45     // 角速度每秒保留比例
+    const DRAG_MAX_ANG_ACC = 6000  // 角加速度上限(deg/s²)
+    const DRAG_WALL_FRICTION = 0.3 // 拖到墙边/地面时保留的速度比例
+    const COM_ARM = 0.42           // 重心在底面之上的高度(占碗高比例)
 
     // ---- 计数牌 / 面板几何 ----
     const BADGE_W = 152            // 计数牌定宽:拖动夹取和面板对齐都按它算,几何才是准的
@@ -306,6 +314,74 @@ window.__ModuleLoader__.load({
     const idbWriteArt = (blob) => withArtStore('readwrite', (store) => store.put(blob, IDB_KEY))
     const idbDropArt = () => withArtStore('readwrite', (store) => store.delete(IDB_KEY))
 
+    /**
+     * 拖拽中的一碗:鼠标是"手",碗吊在手上。
+     *
+     *   · 抓取点被一根弹簧拉向指针(带阻尼),所以碗会稍微滞后、静垂一点点;
+     *   · 碗绕抓取点受重力力矩,也就是单摆方程 θ″ = g·sinφ / L —— 于是它会荡到
+     *     "重心垂在手下"的姿态,拖着走时绕鼠标摆、甩一下会荡起来;
+     *   · 墙壁与地面照样挡住它,只是撞上去不再弹跳。
+     *
+     * 抓取点存的是**碗的局部坐标**,所以它随碗一起转:无论从哪个角抓起来,
+     * 都是那个角被手捏着转。
+     *
+     * @param bowl - 物理状态(原地修改)。
+     * @param view - 视口尺寸 { w, h }。
+     * @param dt - 时间步长(秒)。
+     */
+    function stepDragBowl(bowl, view, dt) {
+      const halfW = bowl.w / 2
+      const rad = (bowl.rot * Math.PI) / 180
+      const cs = Math.cos(rad)
+      const sn = Math.sin(rad)
+
+      // 抓取点:局部坐标 → 世界坐标(变换原点是底面中点,见 CSS 的 transform-origin)
+      const localX = bowl.grabLocalX - halfW
+      const localY = bowl.grabLocalY - bowl.h
+      const grabX = bowl.x + halfW + localX * cs - localY * sn
+      const grabY = bowl.y + bowl.h + localX * sn + localY * cs
+
+      // 重心:相对变换原点的偏移是 (0, -COM_ARM·h)
+
+      // 线速度:弹簧跟手 + 重力,再积分(semi-implicit Euler,DRAG_SPRING 在这个步长下稳定)
+      const errX = bowl.pointerX - grabX
+      const errY = bowl.pointerY - grabY
+      bowl.vx += (DRAG_SPRING * errX - DRAG_DAMP * bowl.vx) * dt
+      bowl.vy += (DRAG_SPRING * errY - DRAG_DAMP * bowl.vy + GRAVITY) * dt
+      bowl.x += bowl.vx * dt
+      bowl.y += bowl.vy * dt
+
+      // 角速度:单摆。支点是**抓取点**(不是碗的变换原点,也不是指针):
+      // 力臂 = 抓取点 → 重心这条随碗一起转的向量,重力在它水平分量上产生力矩。
+      //   τ/m = g · armWorldX
+      //   I/m = |arm|² + (w²+h²)/12     ← 平行轴定理,盒子自身转动惯量兜底
+      const comLocalY = -COM_ARM * bowl.h
+      const armLocalX = -localX // 重心的 x 相对原点是 0
+      const armLocalY = comLocalY - localY
+      const armWorldX = armLocalX * cs - armLocalY * sn
+      const inertia = armLocalX * armLocalX + armLocalY * armLocalY + (bowl.w * bowl.w + bowl.h * bowl.h) / 12
+      const angularAcc = clamp((GRAVITY * armWorldX * DRAG_TORQUE * 180) / (Math.PI * inertia), -DRAG_MAX_ANG_ACC, DRAG_MAX_ANG_ACC)
+      bowl.spin += angularAcc * dt
+      bowl.spin *= Math.pow(DRAG_ANG_DRAG, dt)
+      bowl.rot += bowl.spin * dt
+
+      // 边墙与地面:挡住 + 吃掉大部分速度(拖拽时不该弹跳)
+      const minX = -bowl.w * 0.4
+      const maxX = view.w - bowl.w * 0.6
+      if (bowl.x < minX) {
+        bowl.x = minX
+        bowl.vx = Math.abs(bowl.vx) * DRAG_WALL_FRICTION
+      } else if (bowl.x > maxX) {
+        bowl.x = maxX
+        bowl.vx = -Math.abs(bowl.vx) * DRAG_WALL_FRICTION
+      }
+      const floor = view.h - bowl.h
+      if (bowl.y > floor) {
+        bowl.y = floor
+        if (bowl.vy > 0) bowl.vy = -bowl.vy * DRAG_WALL_FRICTION
+      }
+    }
+
     function Token2RiceOverlay() {
       const [settings, setSettings] = React.useState(loadSettings)
       const [snapshot, setSnapshot] = React.useState(null)
@@ -417,7 +493,13 @@ window.__ModuleLoader__.load({
               active = true
               continue
             }
-            if (bowl.dragging) continue
+            if (bowl.dragging) {
+              // 拖拽中:鼠标是手,碗吊在手上——弹簧跟手 + 绕抓取点的重力力矩(单摆)。
+              stepDragBowl(bowl, view, dt)
+              paint(bowl)
+              active = true
+              continue
+            }
 
             if (!bowl.resting) {
               bowl.vy += GRAVITY * dt
@@ -539,9 +621,11 @@ window.__ModuleLoader__.load({
           splashed: false,
           dragging: false,
           resting: rest,
-          grabDX: 0,
-          grabDY: 0,
-          samples: [],
+          // 抓取点(碗的局部坐标,随碗一起转)与指针的世界坐标
+          grabLocalX: 0,
+          grabLocalY: 0,
+          pointerX: 0,
+          pointerY: 0,
         }
         simRef.current.list.push(bowl)
         simRef.current.bySerial.set(serial, bowl)
@@ -786,16 +870,28 @@ window.__ModuleLoader__.load({
         } catch (error) {
           // 捕获失败也还能靠元素上的事件勉强拖;不致命。
         }
+        const pointerX = event.clientX
+        const pointerY = event.clientY
         bowl.dragging = true
         bowl.resting = false
+        bowl.squash = 0
+        bowl.splashed = false
+        // 把指针位置换算成碗的局部坐标 = 手捏住的那个点;之后它随碗一起转,
+        // 所以抓着碗沿拖的时候,碗是绕着那个碗沿摆的。
+        const rad = (-bowl.rot * Math.PI) / 180
+        const cs = Math.cos(rad)
+        const sn = Math.sin(rad)
+        const dx = pointerX - bowl.x - bowl.w / 2
+        const dy = pointerY - bowl.y - bowl.h
+        bowl.pointerX = pointerX
+        bowl.pointerY = pointerY
+        bowl.grabLocalX = bowl.w / 2 + dx * cs - dy * sn
+        bowl.grabLocalY = bowl.h + dx * sn + dy * cs
+        // 抓到手的一瞬间接管动量,之后由弹簧与单摆重新积累。
         bowl.vx = 0
         bowl.vy = 0
         bowl.spin = 0
-        bowl.squash = 0
-        bowl.splashed = false
-        bowl.grabDX = event.clientX - bowl.x
-        bowl.grabDY = event.clientY - bowl.y
-        bowl.samples = [{ t: performance.now(), x: event.clientX, y: event.clientY }]
+        kick()
         event.preventDefault()
         event.stopPropagation()
       }
@@ -803,12 +899,9 @@ window.__ModuleLoader__.load({
       const moveBowlDrag = (event, serial) => {
         const bowl = simRef.current.bySerial.get(serial)
         if (bowl === undefined || !bowl.dragging) return
-        const view = vpRef.current
-        bowl.x = clamp(event.clientX - bowl.grabDX, -bowl.w * 0.4, Math.max(-bowl.w * 0.4, view.w - bowl.w * 0.6))
-        bowl.y = clamp(event.clientY - bowl.grabDY, -bowl.h * 1.6, view.h - bowl.h)
-        bowl.samples.push({ t: performance.now(), x: event.clientX, y: event.clientY })
-        if (bowl.samples.length > 6) bowl.samples.shift()
-        paint(bowl)
+        // 只记手的位置:位置与姿态由 stepDragBowl 用物理算出来,不再是"贴到指针上"。
+        bowl.pointerX = event.clientX
+        bowl.pointerY = event.clientY
         event.preventDefault()
       }
 
@@ -816,24 +909,16 @@ window.__ModuleLoader__.load({
         const bowl = simRef.current.bySerial.get(serial)
         if (bowl === undefined || !bowl.dragging) return
         bowl.dragging = false
-        let vx = 0
-        let vy = 0
-        const samples = bowl.samples
-        if (samples.length >= 2) {
-          const first = samples[0]
-          const lastSample = samples[samples.length - 1]
-          const dt = Math.max(0.016, (lastSample.t - first.t) / 1000)
-          vx = (lastSample.x - first.x) / dt
-          vy = (lastSample.y - first.y) / dt
-        }
-        const speed = Math.sqrt(vx * vx + vy * vy)
-        const cap = speed > MAX_THROW ? MAX_THROW / speed : 1
-        bowl.vx = vx * cap
-        bowl.vy = vy * cap
-        bowl.spin = clamp(-bowl.vx * SPIN_PER_VX, -MAX_SPIN, MAX_SPIN)
-        bowl.samples = []
         bowl.wait = 0
-        // 松手就是自由落体:哪怕手只是轻轻一放,重力也会接手。
+        // 松手就是自由落体:弹簧攒下的线速度与摆动的角速度直接变成抛出去的初速度,
+        // 只做上限保护,免得猛甩一下把碗甩到屏幕外。
+        const speed = Math.sqrt(bowl.vx * bowl.vx + bowl.vy * bowl.vy)
+        if (speed > MAX_THROW) {
+          const scale = MAX_THROW / speed
+          bowl.vx *= scale
+          bowl.vy *= scale
+        }
+        bowl.spin = clamp(bowl.spin, -MAX_SPIN, MAX_SPIN)
         bowl.resting = false
         kick()
         event.preventDefault()
